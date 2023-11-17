@@ -1,0 +1,17 @@
+-------------------
+Mechanical
+-------------------
+Substrate/component material PT:002003-01 : CE7				pass by design review
+Pixel pitch	100um							pass by design review
+Sensitive aperture: LSL = 153.6 ×103 mm					pass by design review
+
+Pixel array: LSL = 1536 (V/Rows)) x 1030(H/columns)+1 Read out channel 	pass by design review
+– 1dead column with vertical periphery (total number 1031)
+
+
+Die size: 158.308 × 103.122 mm (+ 15um dicing from each edge)		pass by design review
+Sensitive aperture							pass by design review
+------------
+Electronics:				Pass/Fail	Measured	USL
+------------
+

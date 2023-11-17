@@ -1,0 +1,16 @@
+-------------------
+Mechanical
+-------------------
+Substrate/component material PT002383-0A : CuW				pass by design review
+Pixel pitch	100um							pass by design review
+Sensitive aperture: LSL = 204.3 × 204.3 mm					pass by design review
+
+Pixel array: LSL = 2048 (V/Rows)) x 2048(H/columns)+1 Read out channel 	pass by design review
+– 4 dead column with vertical periphery (total number 689)
+
+
+Die size: 204.3 × 204.3 mm (+ 15um dicing from each edge)		pass by design review
+Sensitive aperture							pass by design review
+------------
+Electronics:				Pass/Fail	Measured	USL
+------------

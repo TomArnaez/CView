@@ -1,0 +1,15 @@
+-------------------
+Mechanical
+-------------------
+Substrate/component material PTI-000114-01 : AL				pass by design review
+Pixel pitch	100um							pass by design review
+Sensitive aperture: LSL = 7.6 x  233.1 mm				pass by design review
+
+Pixel array: LSL = 76 (V/Rows)) x 2331 (H/columns)		 	pass by design review
+
+
+Die size: 7.6 x  233.1 mm (+ 15um dicing from each edge)		pass by design review
+------------
+Electronics:				Pass/Fail	Measured	USL
+------------
+
