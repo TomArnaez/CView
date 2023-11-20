@@ -1,3 +1,4 @@
+use crate::capture::corrections::run_defect_map_gen;
 use crate::events::StreamCaptureEvent;
 use crate::image::ImageHandler;
 use crate::image::ImageStack;
@@ -6,6 +7,8 @@ use crate::StreamBuffer;
 use chrono::Utc;
 use futures_util::{pin_mut, StreamExt};
 use log::info;
+use tauri::Manager;
+use std::path::PathBuf;
 use std::sync::Mutex;
 use tauri::ipc::Response;
 use tauri::AppHandle;
@@ -63,6 +66,7 @@ pub async fn run_capture(
 #[tauri::command(async)]
 #[specta::specta]
 pub fn stop_capture(capture_manager_mutex: State<Mutex<CaptureManager>>) {
+    info!("Stopping capture");
     let capture_manager = capture_manager_mutex.lock().unwrap();
     capture_manager.stop_capture();
 }
@@ -81,33 +85,19 @@ pub fn read_stream_buffer(stream_buffer_mutex: State<Mutex<StreamBuffer>>) -> Re
 
 #[tauri::command(async)]
 #[specta::specta]
+pub async fn generate_defect_map(app: AppHandle, capture_manager_mutex: State<'_, Mutex<CaptureManager>>) -> Result<(), ()> {
+    info!("Generating Defect Maps");
+    capture_manager_mutex.lock().unwrap().generate_defect_map(app.clone(), vec![100, 200, 300], 10);
+    Ok(())
+}
+
+#[tauri::command(async)]
+#[specta::specta]
 pub async fn generate_dark_maps(
     app: AppHandle,
     capture_manager_mutex: State<'_, Mutex<CaptureManager>>,
 ) -> Result<(), CaptureError> {
-    /*
-    let dark_map_capture = AdvancedCapture::DarkMapCapture(DarkMapCapture {
-        exp_times: vec![100, 200, 300],
-        frames_per_capture: 10,
-    });
-
-    let stream = capture_manager_mutex
-        .lock()
-        .unwrap()
-        .start_capture(app.clone(), dark_map_capture.clone())?;
-
-    pin_mut!(stream);
-
-    let mut image_handlers: Vec<ImageHandler> = Vec::new();
-
-    while let Some(image_handler) = stream.next().await {
-        let image_handler_clone = ImageHandler::new(
-            image_handler.image.clone(),
-            image_handler.image_metadata.clone(),
-        );
-        image_handlers.push(image_handler_clone);
-    }
-    */
-
+    info!("Generating Dark Maps");
+    capture_manager_mutex.lock().unwrap().generate_dark_maps(vec![100, 200, 300], 10);
     Ok(())
 }

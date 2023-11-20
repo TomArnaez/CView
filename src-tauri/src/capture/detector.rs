@@ -5,11 +5,11 @@ use serde::Serialize;
 use specta::Type;
 use std::{
     collections::HashMap,
-    future::Future,
+    future::{Future, self},
     pin::Pin,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, atomic::AtomicBool},
     thread,
-    time::Duration,
+    time::Duration, path::PathBuf,
 };
 use tokio_util::sync::CancellationToken;
 
@@ -55,14 +55,19 @@ impl DetectorController {
         capture_settings: CaptureSetting,
         dark_maps: Arc<Mutex<HashMap<u32, SLImageRs>>>,
         defect_map: Arc<Mutex<Option<SLImageRs>>>,
+        stop_signal: Arc<AtomicBool>,
     ) -> Result<Pin<Box<dyn Stream<Item = SLImageRs> + Send>>, CaptureError> {
         let stream = capture_settings
             .capture_mode
-            .stream_results(capture_settings.exp_time, self.detector.clone())?;
+            .stream_results(capture_settings.exp_time, self.detector.clone(), stop_signal.clone())?;
 
         let dark_maps_clone = dark_maps.clone();
+        let stop_signal_clone = stop_signal.clone();
 
-        Ok(stream
+        Ok(stream.
+            take_while(move |_| {
+                future::ready(!stop_signal_clone.load(std::sync::atomic::Ordering::Relaxed))
+            })
             .map(move |mut image| {
                 if capture_settings.corrected {
                     if let Some(mut dark_map) = dark_maps_clone
@@ -79,8 +84,6 @@ impl DetectorController {
                     if let Some(ref mut defect_map) = *defect_map.lock().unwrap() {
                         info!("Defect correcting");
                         let mut out_image = SLImageRs::new(image.get_height(), image.get_width());
-                        println!("{} {}", defect_map.get_height(), defect_map.get_width());
-                        println!("{} {}", image.get_height(), image.get_width());
 
                         image.defect_correction(&mut out_image, defect_map).unwrap();
                         out_image
@@ -198,22 +201,6 @@ mod tests {
         stream.boxed()
     }
 
-    #[tokio::test]
-    async fn run_sequence_capture() {
-        let mut detector = SLDeviceRS::new();
-        detector.open_camera(100);
-        std::thread::sleep(Duration::from_secs(2));
-
-        let stream1 = test(10, detector.clone());
-        let stream2 = test(10, detector.clone());
-
-        let vec = stream::iter(vec![stream1, stream2]);
-        let mut flattened = vec.flatten();
-
-        while let Some(image) = flattened.next().await {
-            println!("got image");
-        }
-    }
 
     /*
     #[tokio::test]

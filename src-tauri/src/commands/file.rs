@@ -1,5 +1,4 @@
-use crate::appdata::AppData;
-use crate::events::AppDataEvent;
+
 use crate::image::{ImageService, ImageStack};
 use image::io::Reader as ImageReader;
 use log::info;
@@ -7,19 +6,6 @@ use std::sync::Mutex;
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_dialog::DialogExt;
 use tauri_specta::Event;
-
-#[tauri::command(async)]
-#[specta::specta]
-pub fn startup(app: AppHandle, app_data_mutex: State<Mutex<AppData>>) {
-    let c = tauri::ipc::Response::new(vec![100]);
-
-    info!("Startup command called");
-    let app_data = app_data_mutex.lock().unwrap();
-    match AppDataEvent(app_data.clone()).emit_all(&app) {
-        Ok(()) => info!("ok"),
-        Err(e) => info!("err {e}"),
-    };
-}
 
 #[tauri::command(async)]
 #[specta::specta]

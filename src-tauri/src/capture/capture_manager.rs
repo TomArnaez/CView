@@ -6,7 +6,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
         Arc, Mutex,
     },
-    thread::JoinHandle,
+    thread::JoinHandle, arch::x86_64,
 };
 
 use async_stream::stream;
@@ -19,7 +19,7 @@ use tauri_specta::Event;
 
 use crate::{
     image::{ImageHandler, ImageMetadata},
-    wrapper::{self, *},
+    wrapper::{self, *}, capture::corrections::run_defect_map_gen,
 };
 
 use super::{
@@ -47,13 +47,19 @@ impl CaptureManager {
         let local_data = app.path().app_local_data_dir().unwrap();
 
         let dark_map_path = local_data.join("DarkMaps");
-        let mut defect_map_path = local_data.join("DefectMap");
+        let defect_map_path = local_data.join("DefectMap");
+
         fs::create_dir(&dark_map_path);
         fs::create_dir(&defect_map_path);
+
         let dark_maps = Arc::new(Mutex::new(read_dark_maps(&dark_map_path)));
         let defect_map = Arc::new(Mutex::new(read_defect_map(
             &defect_map_path.join("GlobalDefectMap.tif"),
         )));
+
+        if defect_map.lock().unwrap().is_some() {
+            println!("WE DEFECTIn");
+        }
 
         let info = Arc::new(Mutex::new(CaptureManagerInfo {
             status: CaptureManagerStatus::DetectorDisconnected,
@@ -63,6 +69,7 @@ impl CaptureManager {
         let detector_controller = DetectorController::new(Self::create_detector_callback(
             app.clone(),
             dark_maps.clone(),
+            defect_map.clone(),
             info.clone(),
         ));
 
@@ -78,12 +85,24 @@ impl CaptureManager {
         }
     }
 
-    pub async fn generate_dark_maps(&self, exp_times: Vec<u32>, num_frames: u32) {
+    pub fn generate_dark_maps(&self, exp_times: Vec<u32>, num_frames: u32) {
+        let detector_controller = self.detector_controller.clone();
+        let dark_maps = self.dark_maps.clone();
+        let dark_map_path = self.dark_map_path.clone();
+        let defect_map = self.defect_map.clone();
+        let info = self.info.clone();
+        let stop_signal_clone: Arc<AtomicBool> = self.stop_signal.clone();
+
+        tauri::async_runtime::spawn(async move {
+            info.lock().unwrap().status = CaptureManagerStatus::Capturing;
         stream::iter(exp_times)
             .then(|exp_time| {
-                let detector_controller = self.detector_controller.clone();
-                let dark_maps = self.dark_maps.clone();
-                let defect_map = self.defect_map.clone();
+                let dark_map_path: PathBuf = dark_map_path.clone();
+                let dark_maps = dark_maps.clone();
+                let detector_controller = detector_controller.clone();
+                let dark_map_path = dark_map_path.clone();
+                let defect_map: Arc<Mutex<Option<SLImageRs>>> = defect_map.clone(); 
+                let stop_signal_clone: Arc<AtomicBool> = stop_signal_clone.clone();
 
                 async move {
                     let capture_settings = CaptureSettingBuilder::new(
@@ -102,6 +121,7 @@ impl CaptureManager {
                             capture_settings.clone(),
                             dark_maps.clone(),
                             defect_map.clone(),
+                            stop_signal_clone
                         )
                         .expect("Failed to run capture stream")
                         .enumerate();
@@ -109,9 +129,9 @@ impl CaptureManager {
                     while let Some((index, mut image)) = enumerated_stream.next().await {
                         unsafe {
                             std::ptr::copy_nonoverlapping(
-                                average_image.get_data_pointer(index as u32),
                                 image.get_data_pointer(0),
-                                (image.get_width() * image.get_width() * 2) as usize,
+                                average_image.get_data_pointer(index as u32),
+                                (image.get_width() * image.get_height() * 2) as usize,
                             );
                         }
                     }
@@ -120,7 +140,7 @@ impl CaptureManager {
 
                     average_image
                         .write_tiff_image(
-                            &self.dark_map_path.join(format!("DarkMap_{exp_time}.tif")),
+                            &dark_map_path.join(format!("DarkMap_{exp_time}ms.tif")),
                         )
                         .unwrap();
 
@@ -129,14 +149,30 @@ impl CaptureManager {
             })
             .collect::<Vec<_>>()
             .await;
+
+            info.lock().unwrap().status = CaptureManagerStatus::Available;
+        });
+
+        println!("finished");
     }
 
-    pub async fn generate_defect_map<T: Runtime>(
+    pub fn generate_defect_map<T: Runtime>(
         &self,
         app: AppHandle<T>,
         dark_exp_times: Vec<u32>,
         num_frames: u32,
     ) {
+        let detector_controller = self.detector_controller.clone();
+        let dark_maps = self.dark_maps.clone();
+        let defect_map = self.defect_map.clone(); 
+        let defect_map_path = self.defect_map_path.clone();
+        let info = self.info.clone();
+
+        let stop_signal_clone: Arc<AtomicBool> = self.stop_signal.clone();
+
+
+        tauri::async_runtime::spawn(async move {
+            info.lock().unwrap().status = CaptureManagerStatus::Capturing;
         stream::iter(dark_exp_times)
             .flat_map(|exp_time| {
                 let full_well_modes = [
@@ -155,15 +191,19 @@ impl CaptureManager {
                 )
             })
             .then(|(exp_time, full_well_mode)| {
-                let detector_controller = self.detector_controller.clone();
-                let dark_maps = self.dark_maps.clone();
-                let defect_map = self.defect_map.clone();
+
+                let detector_controller = detector_controller.clone();
+                let defect_map = defect_map.clone();
+                let defect_map_path = defect_map_path.clone();
+                let dark_maps = dark_maps.clone();
+                let stop_signal_clone: Arc<AtomicBool> = stop_signal_clone.clone();
 
                 async move {
                     let capture_settings = CaptureSettingBuilder::new(
                         exp_time,
                         Box::new(SequenceCapture { num_frames }),
                     )
+                    .corrected(false)
                     .full_well(full_well_mode.clone())
                     .build();
 
@@ -172,23 +212,22 @@ impl CaptureManager {
                     let mut enumerated_stream = detector_controller
                         .lock()
                         .unwrap()
-                        .run_capture_stream(capture_settings.clone(), dark_maps, defect_map)
+                        .run_capture_stream(capture_settings.clone(), dark_maps, defect_map, stop_signal_clone)
                         .expect("Failed to run capture stream")
                         .enumerate();
 
                     while let Some((index, mut image)) = enumerated_stream.next().await {
                         unsafe {
                             std::ptr::copy_nonoverlapping(
-                                average_image.get_data_pointer(index as u32),
                                 image.get_data_pointer(0),
-                                (image.get_width() * image.get_width() * 2) as usize,
+                                average_image.get_data_pointer(index as u32),
+                                (image.get_width() * image.get_height() * 2) as usize,
                             );
                         }
                     }
 
-                    let dir = self
-                        .defect_map_path
-                        .join(format!("Test_Image_{exp_time}_{full_well_mode}.tif"));
+                    let dir =                         defect_map_path
+                        .join(format!("1510HS_1510_{exp_time}_Dark{full_well_mode}_Mean.tif"));
 
                     info!("Saving defect map gen image {}", dir.display());
 
@@ -197,29 +236,44 @@ impl CaptureManager {
             })
             .collect::<Vec<_>>()
             .await;
+
+            let images_dir = app.path().app_local_data_dir().unwrap().join("DefectMap");
+            let exe_dir = app.path().resource_dir().unwrap().join("resources\\DefectMapGeneration\\DefectMapGen.exe");
+            run_defect_map_gen(&images_dir, &exe_dir);
+
+            info.lock().unwrap().status = CaptureManagerStatus::Available;
+        });
     }
 
     fn create_detector_callback<T: Runtime>(
         app: AppHandle<T>,
         dark_maps: Arc<Mutex<HashMap<u32, SLImageRs>>>,
+        defect_map: Arc<Mutex<Option<SLImageRs>>>,
         info: Arc<Mutex<CaptureManagerInfo>>,
     ) -> impl FnMut(DetectorStatus) {
         move |status| {
             let mut info = info.lock().unwrap();
             match status {
                 DetectorStatus::Available => {
-                    if info.status == CaptureManagerStatus::DetectorDisconnected {
-                        info.status = CaptureManagerStatus::Available;
+                    if info.status == CaptureManagerStatus::Capturing {
+                    } else {
+                        if dark_maps.lock().unwrap().len() > 0 && defect_map.lock().unwrap().is_some() {
+                            info.status = CaptureManagerStatus::Available;
+                        } else {
+                            info.status = CaptureManagerStatus::NeedsDefectMaps;
+                        }
                     }
                 }
                 DetectorStatus::Disconnected => {
                     info.status = CaptureManagerStatus::DetectorDisconnected;
-                }
+                },
                 _ => {}
             }
 
+            let mut exposure_times = dark_maps.lock().unwrap().keys().cloned().collect::<Vec<u32>>();
+            exposure_times.sort();
             CaptureManagerEvent(CaptureManagerEventPayload {
-                dark_maps: dark_maps.lock().unwrap().keys().cloned().collect(),
+                dark_maps: exposure_times,
                 status: info.status.clone(),
             })
             .emit_all(&app)
@@ -255,18 +309,17 @@ impl CaptureManager {
             return Err(CaptureError::DetectorDisconnected);
         }
 
-        self.emit_event(app.clone());
         self.info.lock().unwrap().status = CaptureManagerStatus::Capturing;
+        self.emit_event(app.clone());
 
         self.stop_signal.store(false, Ordering::SeqCst);
-        let stop_signal = self.stop_signal.clone();
 
         let stream = capture.start_stream(
             app,
             self.detector_controller.clone(),
             self.dark_maps.clone(),
             self.defect_map.clone(),
-            stop_signal,
+            self.stop_signal.clone(),
         );
 
         Ok(Self::wrap_stream(stream, self.info.clone()))
@@ -375,33 +428,6 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn test_dark_map_generate() {
-        let app = create_app(tauri::test::mock_builder());
-        let capture_manager = Arc::new(Mutex::new(CaptureManager::new(app.handle().clone())));
-
-        std::thread::sleep(Duration::from_secs(2));
-
-        capture_manager
-            .lock()
-            .unwrap()
-            .generate_dark_maps(vec![100, 200, 300], 10)
-            .await;
-    }
-
-    #[tokio::test]
-    async fn test_defect_map_gen() {
-        let app = create_app(tauri::test::mock_builder());
-        let capture_manager = Arc::new(Mutex::new(CaptureManager::new(app.handle().clone())));
-
-        std::thread::sleep(Duration::from_secs(2));
-
-        capture_manager
-            .lock()
-            .unwrap()
-            .generate_defect_map(app.handle().clone(), vec![100, 200, 300], 10)
-            .await;
-    }
 
     #[tokio::test]
     async fn test_capture_manager() {

@@ -1,7 +1,7 @@
 use std::{
     fmt,
     pin::Pin,
-    sync::mpsc::{channel, Receiver},
+    sync::{mpsc::{channel, Receiver}, atomic::{AtomicBool, Ordering}, Arc},
     thread,
     time::{Duration, Instant},
 };
@@ -152,6 +152,7 @@ pub trait Capture {
         &self,
         exp_time: u32,
         detector: SLDeviceRS,
+        stop_signal: Arc<AtomicBool>
     ) -> Result<Pin<Box<dyn Stream<Item = SLImageRs> + Send>>, CaptureError>;
 
     fn clone_box(&self) -> Box<dyn Capture + Send + 'static>;
@@ -172,6 +173,7 @@ impl Capture for SequenceCapture {
         &self,
         exp_time: u32,
         mut detector: SLDeviceRS,
+        stop_signal: Arc<AtomicBool>
     ) -> Result<Pin<Box<dyn Stream<Item = SLImageRs> + Send>>, CaptureError> {
         println!("Setting up a sequence stream");
         let capture = self.clone();
@@ -185,6 +187,9 @@ impl Capture for SequenceCapture {
             detector.software_trigger();
 
             for frame_num in 0.. capture.num_frames {
+                if stop_signal.load(Ordering::Relaxed) {
+                    break
+                }
                 let mut image = SLImageRs::new(
                     detector.image_height().unwrap(),
                     detector.image_width().unwrap(),
@@ -209,13 +214,14 @@ impl Capture for StreamCapture {
         &self,
         exp_time: u32,
         mut detector: SLDeviceRS,
+        stop_signal: Arc<AtomicBool>
     ) -> Result<Pin<Box<dyn Stream<Item = SLImageRs> + Send>>, CaptureError> {
         let capture = self.clone();
 
         let stream = stream! {
             let start_time = Instant::now();
             detector.start_stream(exp_time);
-            while capture.duration.is_none() || start_time.elapsed() < capture.duration.unwrap() {
+            while !stop_signal.load(Ordering::Relaxed) && (capture.duration.is_none() || start_time.elapsed() < capture.duration.unwrap()) {
                 let mut image: SLImageRs = SLImageRs::new(
                     detector.image_height().unwrap(),
                     detector.image_width().unwrap(),

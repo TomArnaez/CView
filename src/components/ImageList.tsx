@@ -4,7 +4,7 @@ import classes from "../css/master.module.css";
 import { commands } from "../bindings";
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/primitives";
-import { convert14BArrayToRGBA } from "../utils";
+import { camelCaseToWords, convert14BArrayToRGBA } from "../utils";
 import { useContextMenu } from "mantine-contextmenu";
 import { useImageStore } from "../stores/ImageStore";
 
@@ -38,10 +38,10 @@ export const ImageList = (): JSX.Element => {
     );
 
     const canvas = document.createElement("canvas");
-    canvas.width = 100;
-    canvas.height = 100;
+    canvas.width = 30;
+    canvas.height = 30;
 
-    const rgba_data = convert14BArrayToRGBA(data, 100, 100);
+    const rgba_data = convert14BArrayToRGBA(data, 30, 30);
     const ctx = canvas.getContext("2d");
     if (ctx) {
       const imageData = ctx.createImageData(canvas.width, canvas.height);
@@ -50,40 +50,43 @@ export const ImageList = (): JSX.Element => {
     }
     return canvas;
   };
-
   return (
     <ScrollArea type="auto">
-      {imageStacks.map((stack, stackIdx: number) => (
-        <Card
-          onContextMenu={showContextMenu([
-            {
-              key: "Save",
-              title: "Save stack as TIFF",
-              onClick: () => commands.saveStack(stackIdx),
-            },
-          ])}
-          radius="md"
-          padding="lg"
-          shadow="sm"
-          className={
-            stackIdx === currentStackIdx ? classes.selectedCard : classes.card
-          }
-          onClick={() => setStack(stackIdx)}
-        >
-          {thumbnails[stackIdx] && (
-            <Image
-              src={thumbnails[stackIdx].toDataURL()}
-              alt={`Thumbnail for stack ${stackIdx}`}
-            />
-          )}
-          {stack.capture != null ? <p>{stack.capture.type}</p> : null}
-          <Flex gap="md" justify="center" align="center" direction="row">
-            <FaFile />
-            <p>{stack.image_handlers.length}</p>
-            <p>{stack.timestamp}</p>
-          </Flex>
-        </Card>
-      ))}
+      {imageStacks.map((stack, stackIdx: number) => {
+        const conditionalStyle = stackIdx === currentStackIdx ? { backgroundColor: 'lightgray' } : {};
+
+        return (
+          <Card
+            style={conditionalStyle}
+            onContextMenu={showContextMenu([
+              {
+                key: "Save",
+                title: "Save stack as TIFF",
+                onClick: () => commands.saveStack(stackIdx),
+              },
+            ])}
+            radius="md"
+            padding="lg"
+            shadow="sm"
+            className={classes.SelectedCard}
+            onClick={() => setStack(stackIdx)}
+            key={stackIdx}
+          >
+            {thumbnails[stackIdx] && (
+              <Image
+                src={thumbnails[stackIdx].toDataURL()}
+                alt={`Thumbnail for stack ${stackIdx}`}
+              />
+            )}
+            {stack.capture != null ? <p>{camelCaseToWords(stack.capture.type)}</p> : null}
+            <Flex gap="md" justify="center" align="center" direction="row">
+              <FaFile />
+              <p>{stack.image_handlers.length}</p>
+              <p>{stack.timestamp}</p>
+            </Flex>
+          </Card>
+        );
+      })}
     </ScrollArea>
   );
-};
+}

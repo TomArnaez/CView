@@ -16,25 +16,23 @@ use crate::{
 
 use futures::stream::{self, StreamExt};
 
-use futures_core::{stream::BoxStream, Stream};
+use futures_core::Stream;
 use image::{ImageBuffer, Luma};
 use log::{error, info};
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use std::{
     collections::HashMap,
-    path::PathBuf,
     pin::Pin,
     sync::{
         atomic::{AtomicBool, Ordering},
-        mpsc::Sender,
         Arc, Mutex,
     },
 };
-use tauri::{path::BaseDirectory, AppHandle, Manager, Runtime};
+use tauri::{AppHandle, Runtime};
 
 #[derive(Clone, Serialize, Deserialize, Debug, Type)]
-#[serde(tag = "type")]
+#[serde(tag = "type", rename = "SmartCapture")]
 pub struct SmartCapture {
     pub exp_times: Vec<u32>,
     pub frames_per_capture: u32,
@@ -43,14 +41,14 @@ pub struct SmartCapture {
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, Type)]
-#[serde(tag = "type")]
+#[serde(tag = "type", rename = "SignalAccumulation")]
 pub struct SignalAccumulationCapture {
     pub exp_times: Vec<u32>,
     pub frames_per_capture: u32,
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, Type)]
-#[serde(tag = "type")]
+#[serde(tag = "type", rename = "MultiCapture")]
 pub struct MultiCapture {
     pub exp_times: Vec<u32>,
     pub frames_per_capture: u32,
@@ -76,10 +74,10 @@ impl AdvCapture for LiveCapture {
         let capture_settings =
             CaptureSettingBuilder::new(self.exp_time, Box::new(StreamCapture { duration: None }))
                 .build();
-        let mut stream = detector_controller_mutex
+        let stream = detector_controller_mutex
             .lock()
             .unwrap()
-            .run_capture_stream(capture_settings.clone(), dark_maps_mutex, defect_map_mutex)
+            .run_capture_stream(capture_settings.clone(), dark_maps_mutex, defect_map_mutex, stop_signal.clone())
             .unwrap();
 
         let s = stream
@@ -122,7 +120,7 @@ impl AdvCapture for SmartCapture {
 
                 let capture_settings = CaptureSettingBuilder::new(
                     exp_time,
-                    Box::new(SequenceCapture { num_frames: 10 }),
+                    Box::new(SequenceCapture { num_frames: self.frames_per_capture }),
                 )
                 .build();
 
@@ -133,6 +131,7 @@ impl AdvCapture for SmartCapture {
                         capture_settings.clone(),
                         dark_maps_mutex.clone(),
                         defect_map_mutex.clone(),
+                        stop_signal.clone()
                     )
                     .expect("Failed to run capture stream")
                     .map(move |mut image| {
@@ -178,20 +177,18 @@ impl AdvCapture for SignalAccumulationCapture {
 
                 let capture_settings = CaptureSettingBuilder::new(
                     exp_time,
-                    Box::new(SequenceCapture { num_frames: 10 }),
+                    Box::new(SequenceCapture { num_frames: self.frames_per_capture }),
                 )
                 .build();
 
                 let last_image = Arc::clone(&last_image_mutex);
-
-                let dark_maps_mutex_clone = dark_maps_mutex.clone();
-                let defect_map_mutex_clone = defect_map_mutex.clone();
 
                 detector_controller
                     .run_capture_stream(
                         capture_settings.clone(),
                         dark_maps_mutex.clone(),
                         defect_map_mutex.clone(),
+                        stop_signal.clone()
                     )
                     .expect("Failed to run capture stream")
                     .map(move |mut image| {
@@ -245,7 +242,7 @@ impl AdvCapture for MultiCapture {
 
                 let capture_settings = CaptureSettingBuilder::new(
                     exp_time,
-                    Box::new(SequenceCapture { num_frames: 10 }),
+                    Box::new(SequenceCapture { num_frames: self.frames_per_capture }),
                 )
                 .build();
 
@@ -256,6 +253,7 @@ impl AdvCapture for MultiCapture {
                         capture_settings.clone(),
                         dark_maps_mutex.clone(),
                         defect_map_mutex.clone(),
+                        stop_signal.clone()
                     )
                     .expect("Failed to run capture stream")
                     .take_while(move |_| {

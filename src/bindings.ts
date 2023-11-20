@@ -20,8 +20,13 @@ try {
 async stopCapture() : Promise<null> {
 return await TAURI_INVOKE("plugin:tauri-specta|stop_capture");
 },
-async startup() : Promise<null> {
-return await TAURI_INVOKE("plugin:tauri-specta|startup");
+async generateDefectMap() : Promise<__Result__<null, null>> {
+try {
+    return { status: "ok", data: await TAURI_INVOKE("plugin:tauri-specta|generate_defect_map") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
 },
 async openImages() : Promise<null> {
 return await TAURI_INVOKE("plugin:tauri-specta|open_images");
@@ -61,7 +66,6 @@ export const events = __makeEvents__<{
 streamCaptureEvent: StreamCaptureEvent,
 captureProgressEvent: CaptureProgressEvent,
 cancelCaptureEvent: CancelCaptureEvent,
-appDataEvent: AppDataEvent,
 captureManagerEvent: CaptureManagerEvent,
 imageStateEvent: ImageStateEvent,
 lineProfileEvent: LineProfileEvent,
@@ -70,7 +74,6 @@ histogramEvent: HistogramEvent
 streamCaptureEvent: "plugin:tauri-specta:stream-capture-event",
 captureProgressEvent: "plugin:tauri-specta:capture-progress-event",
 cancelCaptureEvent: "plugin:tauri-specta:cancel-capture-event",
-appDataEvent: "plugin:tauri-specta:app-data-event",
 captureManagerEvent: "plugin:tauri-specta:capture-manager-event",
 imageStateEvent: "plugin:tauri-specta:image-state-event",
 lineProfileEvent: "plugin:tauri-specta:line-profile-event",
@@ -79,15 +82,13 @@ histogramEvent: "plugin:tauri-specta:histogram-event"
 
 /** user-defined types **/
 
-export type AdvancedCapture = ({ type: "SmartCapture" } & SmartCapture) | ({ type: "SignalAccumulationCapture" } & SignalAccumulationCapture) | ({ type: "MultiCapture" } & MultiCapture) | ({ type: "LiveCapture" } & LiveCapture)
+export type AdvancedCapture = ({ type: "SmartCapture" } & SmartCapture) | ({ type: "SignalAccumulationCapture" } & SignalAccumulation) | ({ type: "MultiCapture" } & MultiCapture) | ({ type: "LiveCapture" } & LiveCapture)
 export type Annotation = { Rect: Rect } | { Line: Line }
-export type AppData = { dark_maps_files: { [key in number]: string }; defect_map: string | null }
-export type AppDataEvent = AppData
 export type BinningModesRS = RemoteBinningModes
 export type CancelCaptureEvent = []
 export type CaptureManagerEvent = CaptureManagerEventPayload
 export type CaptureManagerEventPayload = { dark_maps: number[]; status: CaptureManagerStatus }
-export type CaptureManagerStatus = "Available" | "Capturing" | "DetectorDisconnected"
+export type CaptureManagerStatus = "Available" | "Capturing" | "NeedsDefectMaps" | "DetectorDisconnected"
 export type CaptureProgress = { message: string; current_step: number; total_steps: number }
 export type CaptureProgressEvent = CaptureProgress
 export type CaptureSetting = { exp_time: number; dds: boolean; full_well: FullWellModesRS; binning_mode: BinningModesRS; roi: number[] | null; corrected: boolean }
@@ -111,7 +112,7 @@ export type Point = { x: number; y: number }
 export type Rect = { width: number; height: number; pos: Point }
 export type RemoteBinningModes = "BinningUnknown" | "x11" | "x22" | "x44"
 export type RemoteFullWellModes = "High" | "Low" | "Enum"
-export type SignalAccumulationCapture = { exp_times: number[]; frames_per_capture: number; type: "SignalAccumulationCapture" }
+export type SignalAccumulation = { exp_times: number[]; frames_per_capture: number; type: "SignalAccumulation" }
 export type SignalAccumulationData = { accumulated_exp_time: number }
 export type SmartCapture = { exp_times: number[]; frames_per_capture: number; window_size: number; median_filtered: boolean; type: "SmartCapture" }
 export type SmartCaptureData = { signal_noise_ratio: number; background_rect: Rect; foreground_rect: Rect }
@@ -121,7 +122,7 @@ export type StreamCaptureEvent = []
 
          import { invoke as TAURI_INVOKE } from "@tauri-apps/api/primitives";
 import * as TAURI_API_EVENT from "@tauri-apps/api/event";
-import { type Window as __Window__ } from "@tauri-apps/api/window";
+import { type Window as __WebviewWindowHandle__ } from "@tauri-apps/api/window";
 
 type __EventObj__<T> = {
   listen: (
@@ -145,7 +146,7 @@ function __makeEvents__<T extends Record<string, any>>(
   return new Proxy(
     {} as unknown as {
       [K in keyof T]: __EventObj__<T[K]> & {
-        (handle: __Window__): __EventObj__<T[K]>;
+        (handle: __WebviewWindowHandle__): __EventObj__<T[K]>;
       };
     },
     {

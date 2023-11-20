@@ -30,6 +30,11 @@ export const convert14BArrayToRGBA = (array: Uint16Array, width: number, height:
   return data;
 }
 
+export function camelCaseToWords(s: string) {
+  const result = s.replace(/([A-Z])/g, ' $1');
+  return result.charAt(0).toUpperCase() + result.slice(1);
+}
+
 const convert14BitTo8Bit = (value: number): number => {
   const min14Bit = 0;
   const max14Bit = 16383; // 2^14 - 1

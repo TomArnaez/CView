@@ -1,7 +1,6 @@
 use std::{collections::HashMap, sync::Arc};
 
 use crate::{
-    appdata::AppData,
     capture::{types::CaptureManagerInfo},
     image::image::{ImageService, LineProfile},
 };
@@ -17,8 +16,6 @@ pub struct StreamCaptureEvent();
 #[derive(Debug, Clone, Serialize, Type, Event)]
 pub struct CancelCaptureEvent();
 
-#[derive(Debug, Clone, Serialize, Type, Event)]
-pub struct AppDataEvent(pub AppData);
 
 #[serde_as]
 #[derive(Serialize, Deserialize, Type, Clone)]

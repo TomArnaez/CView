@@ -210,6 +210,7 @@ impl ImageHandler {
         match &self.roi {
             Some(roi) => {
                 self.lut = Some(self.image.cumulative_histogram_roi(roi, RANGE_SIZE));
+                info!("{:?}", *roi);
             }
             None => {
                 self.lut = Some(self.image.cumulative_histogram(RANGE_SIZE));
@@ -283,10 +284,23 @@ impl ImageHandler {
 
             iter.for_each(|p| {
                 let lut_val = lut_array[*p as usize];
+                let max_value = RANGE_SIZE as u16 - 1;
 
                 *p = lut_val as u16;
             });
+
         };
+
+        if self.inverted_colours {
+            let iter = thresholded_image.iter_mut();
+
+            iter.for_each(|p| {
+                let max_value = (1u16 << 14) - 1; // Maximum value for a 14-bit image
+
+                // Invert the pixel value directly
+                *p = max_value - *p;
+            });
+        }
 
         thresholded_image
     }
@@ -347,45 +361,57 @@ pub struct ImageIterator<'a> {
     image: &'a ImageBuffer<Luma<u16>, Vec<u16>>,
     roi: Annotation,
     current: u32,
+    coord_iterators: Option<CoordIterators>,
+}
+
+impl<'a> ImageIterator<'a> {
+    pub fn new(
+        image: &'a ImageBuffer<Luma<u16>, Vec<u16>>,
+        roi: Annotation,
+    ) -> Self {
+        Self {
+            image,
+            roi,
+            current: 0,
+            coord_iterators: None,
+        }
+    }
 }
 
 impl<'a> Iterator for ImageIterator<'a> {
     type Item = &'a u16;
 
     fn next(&mut self) -> Option<Self::Item> {
-        match &self.roi {
-            Annotation::Rect(rect) => return None,
-            Annotation::Line(line) => {
-                let dx = (line.finish.x as f64) - (line.start.x as f64);
-                let dy = (line.finish.y as f64) - (line.start.y as f64);
-                let length = (dx.powi(2) + dy.powi(2)).sqrt();
-
-                if self.current <= length as u32 {
-                    let unit_x = dx / length;
-                    let unit_y = dy / length;
-
-                    let x = (line.start.x as f64 + unit_x * self.current as f64).round() as u32;
-                    let y = (line.start.y as f64 + unit_y * self.current as f64).round() as u32;
-                    self.current += 1;
-
-                    if x < self.image.width() && y < self.image.height() {
-                        return Some(&self.image.get_pixel(x, y).0[0]);
-                    }
+        // Determine the appropriate coordinate iterator based on ROI type
+        if self.coord_iterators.is_none() {
+            match &self.roi {
+                Annotation::Rect(rect) => {
+                    let rect_iterator = RectIterator {
+                        rect: rect.clone(),
+                        current_x: rect.pos.x,
+                        current_y: rect.pos.y,
+                    };
+                    self.coord_iterators = Some(CoordIterators::Rect(rect_iterator));
                 }
-
-                return None;
+                Annotation::Line(line) => {
+                    let line_iterator = LineIterator {
+                        line: line.clone(),
+                        current: 0,
+                    };
+                    self.coord_iterators = Some(CoordIterators::Line(line_iterator));
+                }
             }
-        };
-    }
-}
-
-impl<'a> ImageIterator<'a> {
-    fn new(image: &'a ImageBuffer<Luma<u16>, Vec<u16>>, roi: Annotation) -> Self {
-        ImageIterator {
-            image,
-            roi,
-            current: 0,
         }
+
+        if let Some(coord_iterator) = &mut self.coord_iterators {
+            while let Some((x, y)) = coord_iterator.next() {
+                if x < self.image.width() && y < self.image.height() {
+                    return Some(&self.image.get_pixel(x, y).0[0]);
+                }
+            }
+        }
+
+        None
     }
 }
 
@@ -608,6 +634,73 @@ impl ImageMetadataBuilder {
             capture_settings: self.capture_settings.clone(),
             date_created: self.date_created.clone(),
             extra_info: self.extra_info.clone(),
+        }
+    }
+}
+
+trait CoordIterator: Iterator<Item = (u32, u32)> {}
+
+struct RectIterator {
+    rect: Rect,
+    current_x: u32,
+    current_y: u32,
+}
+
+impl Iterator for RectIterator {
+    type Item = (u32, u32);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.current_y < self.rect.pos.y + self.rect.height {
+            let current_point = (self.current_x, self.current_y);
+            self.current_x += 1;
+            if self.current_x == self.rect.pos.x + self.rect.width {
+                self.current_x = self.rect.pos.x;
+                self.current_y += 1;
+            }
+            Some(current_point)
+        } else {
+            None
+        }
+    }
+}
+
+struct LineIterator {
+    line: Line,
+    current: u32,
+}
+
+impl Iterator for LineIterator {
+    type Item = (u32, u32);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let dx = (self.line.finish.x as f64) - (self.line.start.x as f64);
+        let dy = (self.line.finish.y as f64) - (self.line.start.y as f64);
+        let length = (dx.powi(2) + dy.powi(2)).sqrt();
+
+        if self.current <= length as u32 {
+            let t = self.current as f64 / length as f64;
+            let x = (self.line.start.x as f64 + dx * t).round() as u32;
+            let y = (self.line.start.y as f64 + dy * t).round() as u32;
+            self.current += 1;
+            Some((x, y))
+        } else {
+            None
+        }
+    }
+}
+
+enum CoordIterators {
+    Rect(RectIterator),
+    Line(LineIterator),
+}
+
+impl Iterator for CoordIterators {
+    type Item = (u32, u32);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            CoordIterators::Rect(rect_iterator) => rect_iterator.next(),
+            CoordIterators::Line(line_iterator) => line_iterator.next(),
         }
     }
 }

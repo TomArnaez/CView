@@ -30,12 +30,6 @@ const Overlay = ({ pos, adu, imageIdx, metadata }: OverlayProps) => {
           Exposure time: {metadata.capture_settings.exp_time}ms
         </>
       )}
-      { metadata.extra_info && (
-        <>
-          <br />
-          Signal to noise ratio: {metadata.extra_info.signal_noise_ratio.toFixed(3)}
-        </>
-      )}
     </div>
   );
 };

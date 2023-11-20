@@ -8,9 +8,10 @@ import { useImageStore } from "../../stores/ImageStore";
 type ViewerProps = {
   imageCanvas: HTMLCanvasElement;
   drawMode: Mode;
+  interaction: bool
 };
 
-export const Viewer = ({ imageCanvas, drawMode }: ViewerProps): JSX.Element => {
+export const Viewer = ({ imageCanvas, drawMode, interaction }: ViewerProps): JSX.Element => {
   const [mousePos, setMousePos] = useState<Point>({ x: 0, y: 0 });
   const [pixelValue, setPixelValue] = useState<number>(0);
   const { currentImageIdx, currentStackIdx, getImageMetadata } = useImageStore(
@@ -72,12 +73,12 @@ export const Viewer = ({ imageCanvas, drawMode }: ViewerProps): JSX.Element => {
         onInvertColours={handleInvertColours}
         onFlip={handleFlip}
       />
-      <CanvasOverlay
+      {interaction && <CanvasOverlay
         pos={mousePos}
         adu={pixelValue}
         imageIdx={currentImageIdx}
         metadata={getImageMetadata(currentImageIdx, currentStackIdx)}
-      />
+      />}
     </div>
   );
 };

@@ -1,7 +1,6 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-mod appdata;
 mod capture {
     pub mod advanced_capture;
     pub mod capture;
@@ -30,7 +29,6 @@ mod wrapper;
 
 extern crate image as image_lib;
 
-use appdata::AppData;
 use capture::{
     capture_manager::CaptureManager,
     types::{CaptureManagerEvent, CaptureProgressEvent},
@@ -38,12 +36,11 @@ use capture::{
 use charts::types::LineProfileEvent;
 use concurrent_queue::ConcurrentQueue;
 use events::{
-    AppDataEvent, CancelCaptureEvent, HistogramEvent, ImageStateEvent, StreamCaptureEvent,
+    CancelCaptureEvent, HistogramEvent, ImageStateEvent, StreamCaptureEvent,
 };
 use http::{header::*, response::Builder as ResponseBuilder};
 use image::{ImageHandler, ImageService};
 use log::{error, info};
-use regex::Regex;
 use std::{collections::HashMap, fs, path::PathBuf, sync::Mutex};
 use tauri::{http, AppHandle, Manager, Runtime};
 
@@ -71,7 +68,7 @@ fn main() {
                 capture::commands::generate_dark_maps,
                 capture::commands::run_capture,
                 capture::commands::stop_capture,
-                commands::file::startup,
+                capture::commands::generate_defect_map,
                 commands::file::open_images,
                 commands::file::save_image,
                 commands::file::save_stack,
@@ -86,7 +83,6 @@ fn main() {
                 StreamCaptureEvent,
                 CaptureProgressEvent,
                 CancelCaptureEvent,
-                AppDataEvent,
                 CaptureManagerEvent,
                 ImageStateEvent,
                 LineProfileEvent,
@@ -116,7 +112,6 @@ fn main() {
             let handle = app.app_handle();
 
             app.manage(Mutex::new(CaptureManager::new(handle.clone())));
-            app.manage(Mutex::new(AppData::new(handle.clone())));
             app.manage(Mutex::new(ImageService::new(handle.clone())));
             app.manage(Mutex::new(StreamBuffer::new(10)));
 

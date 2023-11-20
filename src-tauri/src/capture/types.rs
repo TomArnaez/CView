@@ -36,6 +36,7 @@ pub struct DetectorInfo {
 pub enum CaptureManagerStatus {
     Available,
     Capturing,
+    NeedsDefectMaps,
     DetectorDisconnected,
 }
 

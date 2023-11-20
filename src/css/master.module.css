@@ -1,8 +1,9 @@
 .card {
-    background-color: white    
+    background-color: lightblue    
 }
+
 .selectedCard {
-    background-color: lightgray
+    background-color: green
 }
 
 .stageParentDiv {

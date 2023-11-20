@@ -30,7 +30,7 @@ import {
   AdvancedCapture,
   LiveCapture,
   AppData,
-  CaptureManagerInfo,
+  CaptureManagerEventPayload,
 } from "./bindings";
 import CaptureForm from "./components/CaptureForm";
 import { ImageList } from "./components/ImageList";
@@ -68,13 +68,14 @@ function App() {
     updateStacks: state.updateStacks,
   }));
 
-  const [captureManagerInfo, setCaptureManagerInfo] = useState<CaptureManagerInfo>({
-    detector_info: null,
-    status: "DetectorDisconnected"
+  const [captureManagerInfo, setCaptureManagerInfo] = useState<CaptureManagerEventPayload>({
+    status: "DetectorDisconnected",
+    dark_maps: [],
   });
+  const [streaming, setStreaming] = useState<boolean>(false);
+  const [unlistenStreamEventState, setUnlistenStreamEventState] = useState<UnlistenFn | null>(null);
   const [progress, setProgress] = useState<number | null>(null);
-  const [drawMode, setDrawMode] = useState<Mode>(Mode.SelectionMode);
-  const [darkMapExps, setDarkMapExps] = useState<number[]>([]);
+  const [drawMode, setDrawMode] = useState<Mode>(Mode.SelectionMode)
   const [imageCanvas, setImageCanvas] = useState<HTMLCanvasElement | null>(
     null
   );
@@ -127,13 +128,6 @@ function App() {
       console.log(e.payload)
       setCaptureManagerInfo(e.payload);
     })
-
-    events.appDataEvent.listen(async (e) => {
-      const appData: AppData = e.payload;
-      setDarkMapExps(Object.keys(appData.dark_maps_files).map(Number));
-    });
-
-    commands.startup();
 
     return () => {
       window.removeEventListener("keydown", handleUserKeyPress);
@@ -189,29 +183,26 @@ function App() {
     await commands.saveStack(currentStackIdx);
   };
 
-  const listenStreamEvent = async (): Promise<UnlistenFn | null> => {
+  const listenStreamEvent = async (): Promise<UnlistenFn> => {
     return events.streamCaptureEvent.listen(async () => {
+
+      const data = new Uint16Array(await invoke("read_stream_buffer", {
+      }));
+      if (data.length != 0) {
+        const width = 1031;
+        const height = 1536;
+        refreshImage(convert14BArrayToRGBA(data, width, height));
+      }
+
       /*
-      const width = 1031;
-      const height = 1536;
-      const converted_data = await convert14BArrayToRGBAWorker(
-        invoke,
-        "read_stream_buffer",
-        width,
-        height
-      );
-      refreshImage(converted_data);
-      */
-
-      const data = await streamWorker.getStreamImage(
-        "http://stream.localhost/"
-      );
-
+      console.log("data");
       if (data != null) {
-        console.log(data);
+        console.log("got data", data);
         refreshImage(data);
       }
     });
+    */
+  });
   };
 
   const handleCapture = async (capture: AdvancedCapture) => {
@@ -222,20 +213,37 @@ function App() {
   };
 
   const handleGoLive = async () => {
+    let unlisten = await listenStreamEvent();
+    setUnlistenStreamEventState(await listenStreamEvent())
+    setStreaming(true);
     const capture: LiveCapture = {
       exp_time: 100,
       type: "LiveCapture",
     };
-    await handleCapture(capture);
+    await commands.runCapture(capture);
   };
 
   const handleStopLive = async () => {
     await commands.stopCapture();
+
+    if (unlistenStreamEventState != null) {
+      await unlistenStreamEventState();
+      setUnlistenStreamEventState(null);
+    }
+
+    setImageCanvas(null);
+    setStreaming(false);
+    console.log("no mo streaming");
   };
 
   const handleAdvancedCapture = async () => {
-    setCaptureSettingsModalOpened(true);
+    if (captureManagerInfo.status == "NeedsDefectMaps") {
+      await commands.generateDefectMap()
+    } else if (captureManagerInfo.status == "Available") {
+      setCaptureSettingsModalOpened(true);
+    }
   };
+
 
   const handleChangeStack = async (index: number) => {
     setStack(index);
@@ -271,6 +279,11 @@ function App() {
     await commands.generateDarkMaps();
   };
 
+  
+  const handleGenerationDefectMap = async () => {
+    await commands.generateDefectMap();
+  };
+
   return (
     <>
       <Modal
@@ -294,7 +307,7 @@ function App() {
         onClose={() => setCaptureSettingsModalOpened(false)}
       >
         <CaptureSettings
-          darkMapExps={darkMapExps}
+          darkMapExps={captureManagerInfo.dark_maps}
           startCapture={handleCapture}
         />
       </Modal>
@@ -356,7 +369,7 @@ function App() {
                   Generate Dark Maps
                 </Menu.Item>
                 <Menu.Item
-                  onClick={handleGenerateDarkMaps}
+                  onClick={handleGenerationDefectMap}
                   icon={<FaRegFileImage size={14} />}
                 >
                   Generate Defect Map
@@ -375,11 +388,14 @@ function App() {
               }}
               variant="filled"
               fullWidth
-              color={captureManagerInfo.status == "Available" ? "blue" : "red"}
+              color={(captureManagerInfo.status == "Available" || captureManagerInfo.status == "NeedsDefectMaps") ? "blue" : "red"}
               disabled={captureManagerInfo.status == "DetectorDisconnected"}
               onClick={handleAdvancedCapture}
             >
-              Advanced Capture
+              {captureManagerInfo.status == "NeedsDefectMaps" && <> Defect Map Generation </>}
+              {captureManagerInfo.status == "Available" && <> Run Advanced Capture </>}
+              {captureManagerInfo.status == "Capturing" && <> Capture In Progress </>}
+
             </Button>
           </div>
 
@@ -411,17 +427,6 @@ function App() {
                 },
               ]}
             />
-            <ActionIcon.Group>
-              <ActionIcon size="xl" style={{ margin: 1 }}>
-                <FaSave></FaSave>
-              </ActionIcon>
-              <ActionIcon size="xl" style={{ margin: 1 }}>
-                <FaChartBar></FaChartBar>
-              </ActionIcon>
-              <ActionIcon size="xl" style={{ margin: 1 }}>
-                <FaChartLine></FaChartLine>
-              </ActionIcon>
-            </ActionIcon.Group>
           </div>
 
           <div
@@ -439,7 +444,7 @@ function App() {
           
               variant="filled"
               color={live ? "red" : "blue"}
-              disabled={captureManagerInfo.status == "DetectorDisconnected"}
+              disabled={captureManagerInfo.status == "DetectorDisconnected" || captureManagerInfo.status == "NeedsDefectMaps"}
               onClick={() => {
                 live ? handleStopLive() : handleGoLive();
                 setLive(!live);
@@ -465,7 +470,7 @@ function App() {
             wrap="nowrap"
           >
             {imageCanvas && (
-              <Viewer drawMode={drawMode} imageCanvas={imageCanvas} />
+              <Viewer drawMode={drawMode} imageCanvas={imageCanvas} interaction={!streaming} />
             )}
           </Flex>
         </AppShell.Main>
