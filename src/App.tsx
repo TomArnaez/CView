@@ -207,9 +207,7 @@ function App() {
 
   const handleCapture = async (capture: AdvancedCapture) => {
     setCaptureSettingsModalOpened(false);
-    //const unlistenStreamEvent = await listenStreamEvent();
     await commands.runCapture(capture);
-    //if (unlistenStreamEvent != null) unlistenStreamEvent();
   };
 
   const handleGoLive = async () => {
@@ -224,15 +222,18 @@ function App() {
   };
 
   const handleStopLive = async () => {
+    console.log("streaming", streaming)
     await commands.stopCapture();
 
     if (unlistenStreamEventState != null) {
-      await unlistenStreamEventState();
       setUnlistenStreamEventState(null);
     }
 
     setImageCanvas(null);
     setStreaming(false);
+    setStack(0);
+    console.log("Stopped streaming", streaming)
+
     console.log("no mo streaming");
   };
 

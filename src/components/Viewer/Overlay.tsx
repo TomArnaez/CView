@@ -8,6 +8,48 @@ type OverlayProps = {
 };
 
 const Overlay = ({ pos, adu, imageIdx, metadata }: OverlayProps) => {
+  const renderExposureTime = () => {
+    if (metadata.capture_settings) {
+      return (
+        <>
+          <br />
+          Image Exposure Time: {metadata.capture_settings.exp_time}ms
+        </>
+      );
+    }
+    return null;
+  };
+
+  const renderSignalAccumulationData = () => {
+    if (
+      metadata.extra_info &&
+      metadata.extra_info.type === "SignalAccumulationData"
+    ) {
+      return (
+        <>
+          <br />
+          Accumulated Exposure Time: {metadata.extra_info.accumulated_exp_time}ms
+        </>
+      );
+    }
+    return null;
+  };
+
+  const renderSmartCaptureData = () => {
+    if (
+      metadata.extra_info &&
+      metadata.extra_info.type === "SmartCaptureData"
+    ) {
+      return (
+        <>
+          <br />
+          SNR: {metadata.extra_info.signal_noise_ratio.toFixed(3)}
+        </>
+      );
+    }
+    return null;
+  };
+
   return (
     <div
       style={{
@@ -19,17 +61,14 @@ const Overlay = ({ pos, adu, imageIdx, metadata }: OverlayProps) => {
         textAlign: "left",
       }}
     >
-      Frame number: {imageIdx}
+      Frame: {imageIdx}
       <br />
       X: {pos.x}, Y: {pos.y}
       <br />
-      Pixel saturation: {adu}
-      {metadata.capture_settings && (
-        <>
-          <br />
-          Exposure time: {metadata.capture_settings.exp_time}ms
-        </>
-      )}
+      Saturation Level: {adu}
+      {renderExposureTime()}
+      {renderSignalAccumulationData()}
+      {renderSmartCaptureData()}
     </div>
   );
 };

@@ -169,6 +169,7 @@ impl AdvCapture for SignalAccumulationCapture {
         let last_image_mutex: Arc<Mutex<Option<ImageBuffer<Luma<u16>, Vec<u16>>>>> =
             Arc::new(Mutex::new(None));
 
+
         let streams = self
             .exp_times
             .iter()
@@ -182,6 +183,7 @@ impl AdvCapture for SignalAccumulationCapture {
                 .build();
 
                 let last_image = Arc::clone(&last_image_mutex);
+                let accumulated_exp_time = Arc::new(Mutex::new(0 as u32));
 
                 detector_controller
                     .run_capture_stream(
@@ -203,13 +205,16 @@ impl AdvCapture for SignalAccumulationCapture {
                                 },
                             );
                         }
+                        
+                        *accumulated_exp_time.lock().unwrap() += exp_time;
+
                         ImageHandler::new(
                             image_buffer,
                             ImageMetadataBuilder::new()
                                 .capture_settings(capture_settings.clone())
                                 .extra_info(ExtraData::SignalAccumulationData(
                                     SignalAccumulationData {
-                                        accumulated_exp_time: exp_time,
+                                        accumulated_exp_time: *accumulated_exp_time.lock().unwrap(),
                                     },
                                 ))
                                 .build(),

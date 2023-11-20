@@ -57,10 +57,6 @@ impl CaptureManager {
             &defect_map_path.join("GlobalDefectMap.tif"),
         )));
 
-        if defect_map.lock().unwrap().is_some() {
-            println!("WE DEFECTIn");
-        }
-
         let info = Arc::new(Mutex::new(CaptureManagerInfo {
             status: CaptureManagerStatus::DetectorDisconnected,
             detector_info: { None },
@@ -152,8 +148,6 @@ impl CaptureManager {
 
             info.lock().unwrap().status = CaptureManagerStatus::Available;
         });
-
-        println!("finished");
     }
 
     pub fn generate_defect_map<T: Runtime>(
