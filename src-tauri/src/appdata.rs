@@ -10,7 +10,6 @@ use tauri::{path::BaseDirectory, Manager};
 use tauri_specta::Event;
 
 use crate::capture::capture::CaptureError;
-use crate::capture::capture_manager::CapturedImage;
 use crate::events::AppDataEvent;
 use crate::wrapper::SLImageRs;
 
@@ -80,6 +79,7 @@ impl AppData {
         app_data
     }
 
+    /*
     pub fn set_dark_maps(
         &mut self,
         app: AppHandle,
@@ -112,6 +112,7 @@ impl AppData {
             Err(e) => Err(()),
         }
     }
+    */
 
     pub fn dark_map(&self, exp_time: u32) -> Result<&PathBuf, CaptureError> {
         match self.dark_maps_files.get(&exp_time) {

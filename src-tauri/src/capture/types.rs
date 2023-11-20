@@ -1,17 +1,21 @@
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    mpsc::Sender,
-    Arc, Mutex,
+use std::{
+    collections::HashMap,
+    path::PathBuf,
+    pin::Pin,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
 };
 
+use crate::{image::ImageHandler, wrapper::SLImageRs};
+
 use super::{
-    advanced_capture::{
-        DarkMapCapture, LiveCapture, MultiCapture, SignalAccumulationCapture,
-        SmartCapture,
-    },
-    detector::DetectorController, capture_manager::AdvCaptureMessage,
+    advanced_capture::{LiveCapture, MultiCapture, SignalAccumulationCapture, SmartCapture},
+    detector::DetectorController,
 };
 use enum_dispatch::enum_dispatch;
+use futures_core::Stream;
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use tauri::{AppHandle, Runtime};
@@ -42,28 +46,26 @@ pub enum AdvancedCapture {
     SmartCapture,
     SignalAccumulationCapture,
     MultiCapture,
-    DarkMapCapture,
     LiveCapture,
 }
 
 #[enum_dispatch]
 pub trait AdvCapture {
-    fn start<T: Runtime>(
+    fn start_stream<T: Runtime>(
         &self,
         app: AppHandle<T>,
         detector_controller_mutex: Arc<Mutex<DetectorController>>,
-        tx: Sender<AdvCaptureMessage>,
+        dark_maps: Arc<Mutex<HashMap<u32, SLImageRs>>>,
+        defect_map: Arc<Mutex<Option<SLImageRs>>>,
         stop_signal: Arc<AtomicBool>,
-    );
+    ) -> Pin<Box<dyn Stream<Item = ImageHandler> + Send>>;
 
     fn check_stop_signal(
         &self,
         stop_signal: &Arc<AtomicBool>,
-        tx: &Sender<AdvCaptureMessage>,
         detector_controller: &mut DetectorController,
     ) -> bool {
         if stop_signal.load(Ordering::SeqCst) {
-            let _ = tx.send(AdvCaptureMessage::Stopped);
             detector_controller.stop_capture();
             true // Indicating that it should stop
         } else {
@@ -93,6 +95,15 @@ impl CaptureProgress {
         self.current_step += 1;
         self.clone()
     }
+}
+
+#[derive(Debug, Clone, Serialize, Type, Event)]
+pub struct CaptureManagerEvent(pub CaptureManagerEventPayload);
+
+#[derive(Debug, Clone, Serialize, Type, Event)]
+pub struct CaptureManagerEventPayload {
+    pub dark_maps: Vec<u32>,
+    pub status: CaptureManagerStatus,
 }
 
 #[derive(Debug, Clone, Serialize, Type, Event)]

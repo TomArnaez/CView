@@ -1,17 +1,21 @@
+use futures_core::stream::Stream;
+use futures_util::StreamExt;
+use log::{error, info};
+use serde::Serialize;
+use specta::Type;
 use std::{
-    sync::{mpsc::Receiver, Arc, Mutex},
+    collections::HashMap,
+    future::Future,
+    pin::Pin,
+    sync::{Arc, Mutex},
     thread,
     time::Duration,
 };
-
-use log::info;
-use serde::Serialize;
-use specta::Type;
 use tokio_util::sync::CancellationToken;
 
-use crate::wrapper::SLDeviceRS;
+use crate::wrapper::{SLDeviceRS, SLImageRs};
 
-use super::capture::{CaptureError, CaptureMessage, CaptureSetting};
+use super::capture::{CaptureError, CaptureSetting};
 
 #[derive(PartialEq, Clone, Serialize, Debug, Type)]
 pub enum DetectorStatus {
@@ -28,7 +32,9 @@ pub struct DetectorController {
 
 impl DetectorController {
     pub fn new<F>(heartbeat_callback: F) -> Self
-    where F: FnMut(DetectorStatus) + Send + 'static, {
+    where
+        F: FnMut(DetectorStatus) + Send + 'static,
+    {
         let controller = DetectorController {
             detector: SLDeviceRS::new(),
             detector_status: Arc::new(Mutex::new(DetectorStatus::Disconnected)),
@@ -38,51 +44,55 @@ impl DetectorController {
         Self::launch_heartbeat_thread::<F>(
             controller.detector.clone(),
             controller.detector_status.clone(),
-            heartbeat_callback
+            heartbeat_callback,
         );
 
         controller
     }
 
-    pub fn run_capture_with_handler<F>(&mut self, capture_settings: CaptureSetting, mut handler: F) -> Result<(), CaptureError>
-    where
-        F: FnMut(crate::capture::capture::CaptureMessage) -> bool {
-            match *self.detector_status.lock().unwrap() {
-                DetectorStatus::Disconnected => return Err(CaptureError::DetectorDisconnected),
-                DetectorStatus::Capturing => return Err(CaptureError::DetectorInUse),
-                _ => {}
-            }
-
-            self.detector.set_exposure_time(capture_settings.exp_time)?;
-            self.detector.set_full_well(capture_settings.full_well)?;
-
-            let token = CancellationToken::new();
-            self.cancellation_token = Some(token.clone());
-            let rx = capture_settings.capture_mode.start(self.detector.clone(), token)?;
-            for recv in rx.iter() {
-                if !handler(recv) {
-                    break;
-                }
-            }
-
-            Ok(())
-    }
-
-    pub fn run_capture(
+    pub fn run_capture_stream(
         &mut self,
         capture_settings: CaptureSetting,
-    ) -> Result<Receiver<CaptureMessage>, CaptureError> {
-        if *self.detector_status.lock().unwrap() != DetectorStatus::Available {
-            return Err(CaptureError::DetectorInUse);
-        }
-        self.detector.set_exposure_time(capture_settings.exp_time)?;
-
-        let token = CancellationToken::new();
-        self.cancellation_token = Some(token.clone());
-        capture_settings
+        dark_maps: Arc<Mutex<HashMap<u32, SLImageRs>>>,
+        defect_map: Arc<Mutex<Option<SLImageRs>>>,
+    ) -> Result<Pin<Box<dyn Stream<Item = SLImageRs> + Send>>, CaptureError> {
+        let stream = capture_settings
             .capture_mode
-            .start(self.detector.clone(), token)
+            .stream_results(capture_settings.exp_time, self.detector.clone())?;
 
+        let dark_maps_clone = dark_maps.clone();
+
+        Ok(stream
+            .map(move |mut image| {
+                if capture_settings.corrected {
+                    if let Some(mut dark_map) = dark_maps_clone
+                        .lock()
+                        .unwrap()
+                        .get_mut(&capture_settings.exp_time)
+                    {
+                        info!("Dark correcting!");
+                        image.offset_correction(&mut dark_map, 300);
+                    } else {
+                        error!("Couldn't access dark map");
+                    }
+
+                    if let Some(ref mut defect_map) = *defect_map.lock().unwrap() {
+                        info!("Defect correcting");
+                        let mut out_image = SLImageRs::new(image.get_height(), image.get_width());
+                        println!("{} {}", defect_map.get_height(), defect_map.get_width());
+                        println!("{} {}", image.get_height(), image.get_width());
+
+                        image.defect_correction(&mut out_image, defect_map).unwrap();
+                        out_image
+                    } else {
+                        error!("Couldn't access defect map");
+                        image
+                    }
+                } else {
+                    image
+                }
+            })
+            .boxed())
     }
 
     pub fn stop_capture(&mut self) {
@@ -96,7 +106,9 @@ impl DetectorController {
         mut detector: SLDeviceRS,
         detector_status_mutex: Arc<Mutex<DetectorStatus>>,
         mut heartbeat_callback: F,
-    )  where F: FnMut(DetectorStatus) + Send + 'static, {
+    ) where
+        F: FnMut(DetectorStatus) + Send + 'static,
+    {
         info!("Launching heartbeat thread");
         tauri::async_runtime::spawn(async move {
             loop {
@@ -127,85 +139,164 @@ impl DetectorController {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use std::{time::Duration, sync::{Arc, Mutex}};
-
-    use crate::capture::{capture::{CaptureSettingBuilder, SequenceCapture}, test_utils::test_utils::setup_controller};
-
-    #[test]
-    fn run_sequence_capture() {
-        let mut controller = setup_controller();
-
-        let capture_settings =
-        CaptureSettingBuilder::new(100, Box::new(SequenceCapture { num_frames: 10 })).build();
-
-        let mut counter = 0;
-        controller.run_capture_with_handler(capture_settings, |message| {
-            match message {
-                crate::capture::capture::CaptureMessage::CapturedImage(_) => counter += 1,
-                crate::capture::capture::CaptureMessage::CaptureCancelled => panic!("Capture was unexpectedly cancelled"),
-                crate::capture::capture::CaptureMessage::CaptureCompleted => return false,
-                _ => (),
-            }
-            true
-        }).unwrap();
-
-        assert_eq!(counter, 10);
-    }
-
-    #[test]
-    fn cancel_capture() {
-        let controller = Arc::new(Mutex::new(setup_controller()));
-
-        let capture_settings =
-        CaptureSettingBuilder::new(100, Box::new(SequenceCapture { num_frames: 10 })).build();
-
-        controller.lock().unwrap().run_capture_with_handler(capture_settings, |message| {
-            match message {
-                crate::capture::capture::CaptureMessage::CapturedImage(_) => controller.lock().unwrap().stop_capture(),
-                crate::capture::capture::CaptureMessage::CaptureCompleted => panic!("Capture did not capture"),
-                _ => {return true}
-            }
-            true
-        }).unwrap();
-    }
-
-    #[test]
-    fn cancel_capture_restart() {
-        let controller = Arc::new(Mutex::new(setup_controller()));
-
-        std::thread::sleep(Duration::from_secs(2));
-
-        let capture_settings =
-        CaptureSettingBuilder::new(100, Box::new(SequenceCapture { num_frames: 10 })).build();
-
-        controller.lock().unwrap().run_capture_with_handler(capture_settings, |message| {
-            match message {
-                crate::capture::capture::CaptureMessage::CapturedImage(_) => controller.lock().unwrap().stop_capture(),
-                crate::capture::capture::CaptureMessage::CaptureCompleted => panic!("Capture did not capture"),
-                _ => {return true}
-            }
-            true
-        }).unwrap();
-
-        let capture_settings2 =
-        CaptureSettingBuilder::new(100, Box::new(SequenceCapture { num_frames: 10 })).build();
-
-        let mut counter = 0;
-        controller.lock().unwrap().run_capture_with_handler(capture_settings2, |message| {
-            match message {
-                crate::capture::capture::CaptureMessage::CapturedImage(_) => counter += 1,
-                crate::capture::capture::CaptureMessage::CaptureCancelled => panic!("Capture was unexpectedly cancelled"),
-                crate::capture::capture::CaptureMessage::CaptureCompleted => return false,
-                _ => (),
-            }
-            true
-        }).unwrap();
-
-        assert_eq!(counter, 10);
-    }
-}
-
 unsafe impl Send for DetectorController {}
 unsafe impl Sync for DetectorController {}
+
+#[cfg(test)]
+mod tests {
+    use std::pin::{self, Pin};
+    use std::sync::atomic::AtomicBool;
+    use std::sync::{Arc, Mutex};
+    use std::time::Duration;
+
+    use crate::capture::advanced_capture::{MultiCapture, SignalAccumulationCapture};
+    use crate::capture::capture::{CaptureSettingBuilder, SequenceCapture, StreamCapture};
+    use crate::capture::types::AdvCapture;
+    use crate::wrapper::{ExposureModes, SLDeviceRS, SLImageRs};
+
+    use super::DetectorController;
+    use async_stream::stream;
+    use futures::stream::{self, StreamExt}; // import StreamExt for chain method
+    use futures::Stream;
+    use futures_util::pin_mut;
+    use tauri::Manager;
+
+    fn create_app<R: tauri::Runtime>(mut builder: tauri::Builder<R>) -> tauri::App<R> {
+        builder
+            .setup(|app| {
+                // do something
+                Ok(())
+            })
+            .build(tauri::generate_context!())
+            .expect("failed to build app")
+    }
+
+    fn test(count: u32, mut detector: SLDeviceRS) -> Pin<Box<dyn Stream<Item = SLImageRs>>> {
+        let stream = stream! {
+            println!("called");
+            detector.set_exposure_time(100);
+            detector.set_exposure_mode(ExposureModes::seq_mode);
+            detector.set_number_frames(count);
+            detector.go_live();
+            detector.software_trigger();
+
+            for frame_num in 0..count {
+                let mut image = SLImageRs::new(
+                    detector.image_height().unwrap(),
+                    detector.image_width().unwrap(),
+                );
+
+                while detector
+                    .read_buffer(&mut image, frame_num as u32, 100)
+                    .is_err() {}
+                yield image;
+            }
+
+            detector.go_unlive(true);
+            println!("finished");
+        };
+        stream.boxed()
+    }
+
+    #[tokio::test]
+    async fn run_sequence_capture() {
+        let mut detector = SLDeviceRS::new();
+        detector.open_camera(100);
+        std::thread::sleep(Duration::from_secs(2));
+
+        let stream1 = test(10, detector.clone());
+        let stream2 = test(10, detector.clone());
+
+        let vec = stream::iter(vec![stream1, stream2]);
+        let mut flattened = vec.flatten();
+
+        while let Some(image) = flattened.next().await {
+            println!("got image");
+        }
+    }
+
+    /*
+    #[tokio::test]
+    async fn run_capture_stream() {
+        let app = create_app(tauri::test::mock_builder());
+        let mut controller = DetectorController::new(|f| {});
+
+        std::thread::sleep(Duration::from_secs(1));
+
+        let stream_capture = Box::new(SequenceCapture { num_frames: 100 });
+        let capture_settings = CaptureSettingBuilder::new(100, stream_capture).build();
+
+        let mut stream = controller.run_capture_stream(capture_settings).unwrap();
+
+        while let Some(mut item) = stream.next().await {
+            println!("Item: {}", item.get_width());
+        }
+    }
+
+    #[tokio::test]
+    async fn test_signal_accum() {
+        let app = create_app(tauri::test::mock_builder());
+        let mut controller = Arc::new(Mutex::new(DetectorController::new(|f| {})));
+
+        let signal_accum_capture = SignalAccumulationCapture {
+            exp_times: vec![],
+            frames_per_capture: 100,
+        };
+        std::thread::sleep(Duration::from_secs(1));
+
+        let mut stream = signal_accum_capture.start_stream(
+            app.handle().clone(),
+            controller,
+            Arc::new(AtomicBool::new(false)),
+        );
+
+        while let Some(image) = stream.next().await {
+            println!("got image");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_multi_capture() {
+        let app = create_app(tauri::test::mock_builder());
+        let controller = Arc::new(Mutex::new(DetectorController::new(|f| {})));
+
+        let multi_capture = MultiCapture {
+            exp_times: vec![100, 200],
+            frames_per_capture: 10,
+        };
+        std::thread::sleep(Duration::from_secs(1));
+
+        let mut stream = multi_capture.start_stream(
+            app.handle().clone(),
+            controller,
+            Arc::new(AtomicBool::new(false)),
+        );
+
+        while let Some(image) = stream.next().await {
+            println!("got image");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_cancel_capture() {
+        let app = create_app(tauri::test::mock_builder());
+        let controller = Arc::new(Mutex::new(DetectorController::new(|f| {})));
+
+        let multi_capture = MultiCapture {
+            exp_times: vec![100, 200],
+            frames_per_capture: 10,
+        };
+        std::thread::sleep(Duration::from_secs(1));
+
+        let stop_signal = Arc::new(AtomicBool::new(false));
+
+        let mut stream =
+            multi_capture.start_stream(app.handle().clone(), controller, stop_signal.clone());
+
+        while let Some(image) = stream.next().await {
+            println!("got image");
+            stop_signal.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
+    */
+}

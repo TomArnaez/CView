@@ -1,4 +1,5 @@
 use super::types::{Annotation, DataExtractor, Line, Rect};
+use super::{ExtraData, ImageMetadata};
 use crate::capture::capture::CaptureSetting;
 use crate::capture::types::AdvancedCapture;
 use crate::charts::charts::ChartSubscriber;
@@ -39,6 +40,8 @@ impl Debug for ImageService {
 
 unsafe impl Send for ImageService {}
 unsafe impl Sync for ImageService {}
+unsafe impl Send for ImageHandler {}
+unsafe impl Sync for ImageHandler {}
 
 impl ImageService {
     pub fn new(app: AppHandle) -> Self {
@@ -160,7 +163,7 @@ pub struct ImageHandler {
     pub image: ImageBuffer<Luma<u16>, Vec<u16>>,
     #[serde(skip)]
     subscribers: Vec<Box<dyn ChartSubscriber + Send>>,
-    image_metadata: ImageMetadata,
+    pub image_metadata: ImageMetadata,
     pub roi: Option<Annotation>,
     pub inverted_colours: bool,
 }
@@ -256,13 +259,13 @@ impl ImageHandler {
         let mut lut = [0u16; RANGE_SIZE];
 
         let mid_point = RANGE_SIZE as f32 / 2.0;
-    
+
         for i in 0..RANGE_SIZE {
             let mut value = (i as f32 - mid_point) * contrast + mid_point + brightness as f32;
             value = value.max(0.0).min(RANGE_SIZE as f32 - 1.0); // Clamping to 0-RANGE_SIZE-1
             lut[i] = value as u16;
         }
-    
+
         lut
     }
 
@@ -568,32 +571,6 @@ impl DataExtractor for Line {
 
         profile.into_iter().zip(indices.into_iter()).collect()
     }
-}
-
-#[derive(Clone, Serialize, Type, Debug)]
-pub struct ImageMetadata {
-    pub capture_settings: Option<CaptureSetting>,
-    pub date_created: Option<DateTime<Utc>>,
-    pub extra_info: Option<ExtraData>,
-}
-
-#[derive(Clone, Serialize, Type, Debug)]
-#[serde(tag = "type")]
-pub enum ExtraData {
-    SmartCaptureData(SmartCaptureData),
-    SignalAccumulationData(SignalAccumulationData),
-}
-
-#[derive(Clone, Serialize, Type, Debug)]
-pub struct SmartCaptureData {
-    pub signal_noise_ratio: f64,
-    pub background_rect: Rect,
-    pub foreground_rect: Rect,
-}
-
-#[derive(Clone, Serialize, Type, Debug)]
-pub struct SignalAccumulationData {
-    pub accumulated_exp_time: u32,
 }
 
 pub struct ImageMetadataBuilder {

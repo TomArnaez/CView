@@ -145,28 +145,3 @@ pub fn remove_image_stack(image_service_mutex: State<Mutex<ImageService>>, stack
     let mut image_service = image_service_mutex.lock().unwrap();
     image_service.remove_image_stack(stack_idx as usize);
 }
-
-/*
-#[tauri::command(async)]
-pub fn update_threshold(
-    min_threshold: u32,
-    max_threshold: u32,
-    image_data_state: State<Mutex<ImageService>>,
-) {
-    let mut state: std::sync::MutexGuard<'_, ImageService> = image_data_state.lock().unwrap();
-
-    //state.image_handlers[0][0].set_threshold(min_threshold, max_threshold);
-}
-
-#[tauri::command(async)]
-#[specta::specta]
-pub fn get_histogram(
-    annotation: Annotation,
-    image_idx: u32,
-    image_data_state: State<Mutex<ImageService>>,
-) -> Option<Vec<u16>> {
-    let mut state = image_data_state.lock().unwrap();
-
-    return None;
-}
-*/

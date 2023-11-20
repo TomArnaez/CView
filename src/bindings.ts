@@ -79,22 +79,20 @@ histogramEvent: "plugin:tauri-specta:histogram-event"
 
 /** user-defined types **/
 
-export type AdvancedCapture = ({ type: "SmartCapture" } & SmartCapture) | ({ type: "SignalAccumulationCapture" } & SignalAccumulationCapture) | ({ type: "MultiCapture" } & MultiCapture) | ({ type: "DarkMapCapture" } & DarkMapCapture) | ({ type: "LiveCapture" } & LiveCapture)
+export type AdvancedCapture = ({ type: "SmartCapture" } & SmartCapture) | ({ type: "SignalAccumulationCapture" } & SignalAccumulationCapture) | ({ type: "MultiCapture" } & MultiCapture) | ({ type: "LiveCapture" } & LiveCapture)
 export type Annotation = { Rect: Rect } | { Line: Line }
 export type AppData = { dark_maps_files: { [key in number]: string }; defect_map: string | null }
 export type AppDataEvent = AppData
 export type BinningModesRS = RemoteBinningModes
 export type CancelCaptureEvent = []
-export type CaptureManagerEvent = CaptureManagerInfo
-export type CaptureManagerInfo = { detector_info: DetectorInfo | null; status: CaptureManagerStatus }
+export type CaptureManagerEvent = CaptureManagerEventPayload
+export type CaptureManagerEventPayload = { dark_maps: number[]; status: CaptureManagerStatus }
 export type CaptureManagerStatus = "Available" | "Capturing" | "DetectorDisconnected"
 export type CaptureProgress = { message: string; current_step: number; total_steps: number }
 export type CaptureProgressEvent = CaptureProgress
-export type CaptureSetting = { exp_time: number; dds: boolean; full_well: FullWellModesRS; binning_mode: BinningModesRS; roi: number[] | null }
+export type CaptureSetting = { exp_time: number; dds: boolean; full_well: FullWellModesRS; binning_mode: BinningModesRS; roi: number[] | null; corrected: boolean }
 export type Chart = "Histogram" | "LineProfile"
 export type CorrectionError = { SLError: InternalSLError } | { FileNotFound: string }
-export type DarkMapCapture = { exp_times: number[]; frames_per_capture: number; type: "DarkMapCapture" }
-export type DetectorInfo = { interface: string }
 export type ExtraData = ({ type: "SmartCaptureData" } & SmartCaptureData) | ({ type: "SignalAccumulationData" } & SignalAccumulationData)
 export type FullWellModesRS = { remote_ty: RemoteFullWellModes }
 export type Histogram = { data: { [key in number]: number } }
@@ -123,7 +121,7 @@ export type StreamCaptureEvent = []
 
          import { invoke as TAURI_INVOKE } from "@tauri-apps/api/primitives";
 import * as TAURI_API_EVENT from "@tauri-apps/api/event";
-import { type Window as __WebviewWindowHandle__ } from "@tauri-apps/api/window";
+import { type Window as __Window__ } from "@tauri-apps/api/window";
 
 type __EventObj__<T> = {
   listen: (
@@ -147,7 +145,7 @@ function __makeEvents__<T extends Record<string, any>>(
   return new Proxy(
     {} as unknown as {
       [K in keyof T]: __EventObj__<T[K]> & {
-        (handle: __WebviewWindowHandle__): __EventObj__<T[K]>;
+        (handle: __Window__): __EventObj__<T[K]>;
       };
     },
     {

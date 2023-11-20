@@ -9,8 +9,8 @@ mod capture {
     pub mod commands;
     pub mod corrections;
     pub mod detector;
-    pub mod types;
     pub mod test_utils;
+    pub mod types;
 }
 mod charts {
     pub mod charts;
@@ -30,47 +30,26 @@ mod wrapper;
 
 extern crate image as image_lib;
 
-use image::{ImageHandler, ImageService};
-use std::sync::Mutex;
-use capture::{capture_manager::CaptureManager, types::CaptureProgressEvent};
-use charts::types::LineProfileEvent;
-use tauri::{http, Manager};
-use http::{header::*, response::Builder as ResponseBuilder};
 use appdata::AppData;
+use capture::{
+    capture_manager::CaptureManager,
+    types::{CaptureManagerEvent, CaptureProgressEvent},
+};
+use charts::types::LineProfileEvent;
 use concurrent_queue::ConcurrentQueue;
 use events::{
-    AppDataEvent, CancelCaptureEvent, CaptureManagerEvent,
-    HistogramEvent, ImageStateEvent, StreamCaptureEvent,
+    AppDataEvent, CancelCaptureEvent, HistogramEvent, ImageStateEvent, StreamCaptureEvent,
 };
-use specta::Type;
+use http::{header::*, response::Builder as ResponseBuilder};
+use image::{ImageHandler, ImageService};
+use log::{error, info};
+use regex::Regex;
+use std::{collections::HashMap, fs, path::PathBuf, sync::Mutex};
+use tauri::{http, AppHandle, Manager, Runtime};
 
-use tauri_plugin_log::{
-    fern::colors::ColoredLevelConfig,
-    Target, TargetKind,
-};
+use tauri_plugin_log::{fern::colors::ColoredLevelConfig, Target, TargetKind};
 
-#[derive(Debug, thiserror::Error, Type)]
-pub enum Error {
-    #[error("The mutex was poisoned")]
-    PoisonError(String),
-    #[error("capture error occured")]
-    CaptureError(String),
-}
-
-impl serde::Serialize for Error {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::ser::Serializer,
-    {
-        serializer.serialize_str(self.to_string().as_ref())
-    }
-}
-
-impl<T> From<std::sync::PoisonError<T>> for Error {
-    fn from(err: std::sync::PoisonError<T>) -> Self {
-        Error::PoisonError(err.to_string())
-    }
-}
+use crate::wrapper::SLImageRs;
 
 pub struct StreamBuffer {
     pub q: ConcurrentQueue<ImageHandler>,
@@ -84,6 +63,7 @@ impl StreamBuffer {
         buffer
     }
 }
+
 fn main() {
     let specta_builder = {
         let specta_builder = tauri_specta::ts::builder()
@@ -134,11 +114,12 @@ fn main() {
         .plugin(tauri_plugin_window::init())
         .setup(|app| {
             let handle = app.app_handle();
-            app.manage(Mutex::new(CaptureManager::new(app.handle().clone())));
+
+            app.manage(Mutex::new(CaptureManager::new(handle.clone())));
             app.manage(Mutex::new(AppData::new(handle.clone())));
             app.manage(Mutex::new(ImageService::new(handle.clone())));
             app.manage(Mutex::new(StreamBuffer::new(10)));
-            
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

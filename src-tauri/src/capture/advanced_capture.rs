@@ -1,67 +1,59 @@
 use super::{
-    capture::{
-        CaptureMessage, CaptureSettingBuilder, SequenceCapture,
-        StreamCapture,
-    }, capture_manager::AdvCaptureMessage, detector::DetectorController, types::AdvCapture,
+    capture::{CaptureSettingBuilder, SequenceCapture, StreamCapture},
+    detector::DetectorController,
+    types::AdvCapture,
 };
 
 use crate::{
-    capture::{corrections::apply_corrections, capture_manager::CapturedImage, types::CaptureProgress},
-    image::{ImageMetadata, ImageMetadataBuilder, SmartCaptureData, ExtraData, SignalAccumulationData},
+    image::{
+        ExtraData, ImageHandler, ImageMetadata, ImageMetadataBuilder, SignalAccumulationData,
+        SmartCaptureData,
+    },
     operations,
     statistics::snr_threaded,
-    wrapper::FullWellModesRS,
+    wrapper::{FullWellModesRS, SLImageRs},
 };
 
+use futures::stream::{self, StreamExt};
+
+use futures_core::{stream::BoxStream, Stream};
+use image::{ImageBuffer, Luma};
 use log::{error, info};
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use std::{
+    collections::HashMap,
+    path::PathBuf,
+    pin::Pin,
     sync::{
-        atomic::AtomicBool,
+        atomic::{AtomicBool, Ordering},
         mpsc::Sender,
         Arc, Mutex,
-    }, path::PathBuf,
+    },
 };
-use tauri::{AppHandle, Runtime, Manager, path::BaseDirectory};
-
+use tauri::{path::BaseDirectory, AppHandle, Manager, Runtime};
 
 #[derive(Clone, Serialize, Deserialize, Debug, Type)]
 #[serde(tag = "type")]
 pub struct SmartCapture {
-    exp_times: Vec<u32>,
-    frames_per_capture: u32,
-    window_size: u32,
-    median_filtered: bool,
+    pub exp_times: Vec<u32>,
+    pub frames_per_capture: u32,
+    pub window_size: u32,
+    pub median_filtered: bool,
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, Type)]
 #[serde(tag = "type")]
 pub struct SignalAccumulationCapture {
-    exp_times: Vec<u32>,
-    frames_per_capture: u32,
-}
-
-#[derive(Clone, Serialize, Deserialize, Debug, Type)]
-#[serde(tag = "type")]
-pub struct DarkMapCapture {
     pub exp_times: Vec<u32>,
     pub frames_per_capture: u32,
-}
-
-#[derive(Clone, Serialize, Deserialize, Type)]
-#[serde(tag = "type")]
-pub struct DefectMapCapture {
-    dark_exp_times: Vec<u32>,
-    full_well_modes: Vec<FullWellModesRS>,
-    frames_per_capture: u32,
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, Type)]
 #[serde(tag = "type")]
 pub struct MultiCapture {
-    exp_times: Vec<u32>,
-    frames_per_capture: u32,
+    pub exp_times: Vec<u32>,
+    pub frames_per_capture: u32,
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, Type)]
@@ -70,472 +62,241 @@ pub struct LiveCapture {
     pub exp_time: u32,
 }
 
-impl AdvCapture for DefectMapCapture {
-    fn start<T: Runtime>(
-        &self,
-        app: AppHandle<T>,
-        detector_controller_mutex: Arc<Mutex<DetectorController>>,
-        tx: Sender<AdvCaptureMessage>,
-        stop_signal: Arc<AtomicBool>,
-    ) {
-        self.dark_exp_times.iter().flat_map(|time| {
-            self.full_well_modes.iter().map(move |mode| (time, mode))
-        }).for_each(|(time, mode)| {
-            let capture_settings =
-            CaptureSettingBuilder::new(*time, Box::new(SequenceCapture { num_frames: 1 })).full_well(mode.clone()).build();
-
-            let mut detector_controller = detector_controller_mutex.lock().unwrap();
-
-            detector_controller.run_capture_with_handler(capture_settings.clone(), |message| {
-                match message {
-                    CaptureMessage::CapturedImage(mut image) => {
-                        let metadata = ImageMetadataBuilder::new().capture_settings(capture_settings.clone()).build();
-
-                        let defect_images_path = app.path().resolve(format!("DefectMapGeneration/Images/1510HS_1510_33_{time}ms_Dark{mode}_Mean.tif"), BaseDirectory::AppLocalData).unwrap();
-                        match image.write_tiff_image(&PathBuf::from(format!("C:/Users/ThomasArnaez/1510HS_1510_33_{time}ms_Dark{mode}_Mean.tif"))) {
-                            Ok(_) => info!("Saved defect map image succesfully"),
-                            Err(_) => error!("Failed to save defect map image"),
-                        }
-                        true
-                    },                    
-                    CaptureMessage::CaptureCompleted => {
-                        info!("defect capture completed");
-                        true
-                    },
-                    CaptureMessage::CaptureCancelled => {
-                        info!("defect capture cancelled");
-                        false
-                    },
-                }
-            }).unwrap();
-        });
-    }
-}
-
 impl AdvCapture for LiveCapture {
-    fn start<T: Runtime>(
+    fn start_stream<T: Runtime>(
         &self,
         app: AppHandle<T>,
         detector_controller_mutex: Arc<Mutex<DetectorController>>,
-        tx: Sender<AdvCaptureMessage>,
+        dark_maps_mutex: Arc<Mutex<HashMap<u32, SLImageRs>>>,
+        defect_map_mutex: Arc<Mutex<Option<SLImageRs>>>,
         stop_signal: Arc<AtomicBool>,
-    ) {
+    ) -> Pin<Box<dyn Stream<Item = ImageHandler> + Send>> {
         info!("Starting Live Capture");
 
         let capture_settings =
-            CaptureSettingBuilder::new(self.exp_time, Box::new(StreamCapture { duration: None })).build();
+            CaptureSettingBuilder::new(self.exp_time, Box::new(StreamCapture { duration: None }))
+                .build();
+        let mut stream = detector_controller_mutex
+            .lock()
+            .unwrap()
+            .run_capture_stream(capture_settings.clone(), dark_maps_mutex, defect_map_mutex)
+            .unwrap();
 
-        let mut detector_controller = detector_controller_mutex.lock().unwrap();
+        let s = stream
+            .map(move |mut image| {
+                ImageHandler::new(
+                    image.to_image_buffer(),
+                    ImageMetadataBuilder::new()
+                        .capture_settings(capture_settings.clone())
+                        .build(),
+                )
+            })
+            .boxed();
 
-        match detector_controller.run_capture(capture_settings.clone()) {
-            Ok(rx) => {
-                for recv in rx {
-                    if self.check_stop_signal(&stop_signal, &tx, &mut *detector_controller) {
-                        return;
-                    }
-
-                    match recv {
-                        CaptureMessage::CapturedImage(mut image) => {
-                            match apply_corrections(app.clone(), self.exp_time, &mut image) {
-                                Ok(mut corrected_image) => {
-                                    tx.send(AdvCaptureMessage::CapturedImage(CapturedImage {
-                                        data: corrected_image.to_image_buffer(),
-                                        metadata: ImageMetadata {
-                                            capture_settings: Some(capture_settings.clone()),
-                                            date_created: None,
-                                            extra_info: None,
-                                        },
-                                    }));
-                                }
-                                Err(e) => {
-                                    error!("Got error during Live Capture: {e}");
-                                    tx.send(AdvCaptureMessage::Error);
-                                    return;
-                                }
-                            }
-                        }
-                        CaptureMessage::CaptureCancelled => return,
-                        _ => {}
-                    }
-                }
-            }
-            Err(_) => todo!(),
-        }
-    }
-}
-
-impl AdvCapture for DarkMapCapture {
-    fn start<T: Runtime>(
-        &self,
-        app: AppHandle<T>,
-        detector_controller_mutex: Arc<Mutex<DetectorController>>,
-        tx: Sender<AdvCaptureMessage>,
-        stop_signal: Arc<AtomicBool>,
-    ) {
-        info!("Running Dark Map Capture");
-        let mut dark_maps = Vec::new();
-
-        for exp_time in self.exp_times.iter() {
-            info!("Exposure Time: {}", exp_time);
-
-            let mut detector_controller =
-                detector_controller_mutex.lock().unwrap();
-
-            if self.check_stop_signal(&stop_signal, &tx, &mut *detector_controller) {
-                return;
-            }
-
-            let capture_settings = CaptureSettingBuilder::new(*exp_time, Box::new(SequenceCapture {
-                num_frames: self.frames_per_capture,
-            })).build();
-
-            detector_controller.run_capture_with_handler(capture_settings.clone(), |message| {
-                match message {
-                    CaptureMessage::CapturedImage(mut image) => {
-                        let metadata = ImageMetadataBuilder::new().capture_settings(capture_settings.clone()).build();
-
-                        dark_maps.push(
-                            (CapturedImage {
-                                data: image.to_image_buffer(),
-                                metadata,
-                            }),
-                        );
-
-                        tx.send(AdvCaptureMessage::CapturedImage(dark_maps.last().unwrap().clone()));
-
-                        true
-                    },
-                    CaptureMessage::CaptureCompleted => {
-                        tx.send(AdvCaptureMessage::CaptureCompleted(dark_maps.to_vec()));
-                        return true;
-                    }
-                    CaptureMessage::CaptureCancelled => false,
-                }
-            }).unwrap();
-        }
-
-        tx.send(AdvCaptureMessage::CaptureCompleted(Vec::new()));
+        s
     }
 }
 
 impl AdvCapture for SmartCapture {
-    fn start<T: Runtime>(
+    fn start_stream<T: Runtime>(
         &self,
         app: AppHandle<T>,
         detector_controller_mutex: Arc<Mutex<DetectorController>>,
-        tx: Sender<AdvCaptureMessage>,
+        dark_maps_mutex: Arc<Mutex<HashMap<u32, SLImageRs>>>,
+        defect_map_mutex: Arc<Mutex<Option<SLImageRs>>>,
         stop_signal: Arc<AtomicBool>,
-    ) {
+    ) -> Pin<Box<dyn Stream<Item = ImageHandler> + Send>> {
+        const MAX_PIXEL_VALUE: u16 = 16383;
         info!("Starting Smart Capture");
-        let mut detector_controller = detector_controller_mutex.lock().unwrap();
 
-        let mut images = Vec::new();
-        let mut curr_snr: Option<f64> = None;
+        let best_snr: Arc<Mutex<Option<ImageBuffer<Luma<u16>, Vec<u16>>>>> =
+            Arc::new(Mutex::new(None));
 
-        for (i, exp_time) in self.exp_times.iter().enumerate() {
-            if self.check_stop_signal(&stop_signal, &tx, &mut *detector_controller) {
-                return;
-            }
-            info!("Capturing frame {i} with exposure time {exp_time}");
+        let streams = self
+            .exp_times
+            .iter()
+            .map(|&exp_time| {
+                let mut detector_controller = detector_controller_mutex
+                    .lock()
+                    .expect("Failed to acquire detector controller lock");
 
-            let capture_settings = CaptureSettingBuilder::new(*exp_time, Box::new(SequenceCapture {
-                num_frames: self.frames_per_capture,
-            })).build();
+                let capture_settings = CaptureSettingBuilder::new(
+                    exp_time,
+                    Box::new(SequenceCapture { num_frames: 10 }),
+                )
+                .build();
 
-            detector_controller.run_capture_with_handler(capture_settings.clone(), |message| {
-                match message {
-                    CaptureMessage::CapturedImage(mut image) => {
-                        match apply_corrections(app.clone(), *exp_time, &mut image) {
-                            Ok(mut corrected_image) => {
-                                let mut image_buffer = corrected_image.to_image_buffer();
+                let window_size = self.window_size;
 
-                                let metadata = ImageMetadataBuilder::new().capture_settings(capture_settings.clone()).build();
+                detector_controller
+                    .run_capture_stream(
+                        capture_settings.clone(),
+                        dark_maps_mutex.clone(),
+                        defect_map_mutex.clone(),
+                    )
+                    .expect("Failed to run capture stream")
+                    .map(move |mut image| {
+                        let image_buffer = image.to_image_buffer();
+                        let snr_results = snr_threaded(&image_buffer, window_size).unwrap();
+                        let image_metadata = ImageMetadataBuilder::new()
+                            .capture_settings(capture_settings.clone())
+                            .extra_info(ExtraData::SmartCaptureData(SmartCaptureData {
+                                signal_noise_ratio: snr_results.0.clone(),
+                                background_rect: snr_results.1.clone(),
+                                foreground_rect: snr_results.2.clone(),
+                            }))
+                            .build();
+                        ImageHandler::new(image_buffer, image_metadata)
+                    })
+            })
+            .collect::<Vec<_>>();
 
-                                if self.median_filtered {
-                                    image_buffer = operations::median_filter_threaded(
-                                        &image_buffer,
-                                        3,
-                                        3,
-                                    );
-                                }
-
-                                let mut captured_image = CapturedImage {
-                                    data: image_buffer.clone(),
-                                    metadata,
-                                };
-
-                                tx.send(AdvCaptureMessage::CapturedImage(
-                                    captured_image.clone(),
-                                ));
-
-                                if let Ok(snr_results) =
-                                snr_threaded(&mut captured_image.data, self.window_size)
-                            {
-                                info!("SNR of new frame: {}", snr_results.0);
-                                
-                                captured_image.metadata.extra_info = Some(ExtraData::SmartCaptureData(SmartCaptureData {
-                                    signal_noise_ratio: snr_results.0,
-                                    background_rect: snr_results.1,
-                                    foreground_rect: snr_results.2
-                                }));
-
-                                if let Some(last_snr) = curr_snr {
-                                    if snr_results.0 > last_snr {
-                                        images.clear();
-                                        curr_snr = Some(snr_results.0);
-                                        images.push(captured_image);
-                                    }
-                                } else {
-                                    curr_snr = Some(snr_results.0);
-                                    images.push(captured_image);
-                                }
-                            } else {
-                            }
-                                true
-                            },
-                            Err(e) => {
-                                error!("Got error {e} whilst applying corrections");
-                                false
-                            },
-                        }
-                    },
-                    CaptureMessage::CaptureCompleted => true,
-                    CaptureMessage::CaptureCancelled => true,
-                }
-            }).unwrap();
-        }
-
-        info!("Finished smart capture");
-        tx.send(AdvCaptureMessage::CaptureCompleted(images));
+        stream::iter(streams).flatten().boxed()
     }
 }
 
 impl AdvCapture for SignalAccumulationCapture {
-    fn start<T: Runtime>(
+    fn start_stream<T: Runtime>(
         &self,
         app: AppHandle<T>,
         detector_controller_mutex: Arc<Mutex<DetectorController>>,
-        tx: Sender<AdvCaptureMessage>,
+        mut dark_maps_mutex: Arc<Mutex<HashMap<u32, SLImageRs>>>,
+        defect_map_mutex: Arc<Mutex<Option<SLImageRs>>>,
         stop_signal: Arc<AtomicBool>,
-    ) {
-        info!("Starting Signal Accumulation Capture");
+    ) -> Pin<Box<dyn Stream<Item = ImageHandler> + Send>> {
+        const MAX_PIXEL_VALUE: u16 = 16383;
+        info!("Starting Smart Capture");
 
-        let mut detector_controller = detector_controller_mutex.lock().unwrap();
-        let mut images: Vec<CapturedImage> = Vec::new();
+        let last_image_mutex: Arc<Mutex<Option<ImageBuffer<Luma<u16>, Vec<u16>>>>> =
+            Arc::new(Mutex::new(None));
 
-        let mut progress = CaptureProgress::new(self.exp_times.len() as u32, String::from("Starting Signal Accumulation Capture"));
+        let streams = self
+            .exp_times
+            .iter()
+            .map(|&exp_time| {
+                let mut detector_controller = detector_controller_mutex.lock().unwrap();
 
-        tx.send(AdvCaptureMessage::Progress(progress.clone()));
+                let capture_settings = CaptureSettingBuilder::new(
+                    exp_time,
+                    Box::new(SequenceCapture { num_frames: 10 }),
+                )
+                .build();
 
-        for exp_time in &self.exp_times {
-            if self.check_stop_signal(&stop_signal, &tx, &mut *detector_controller) {
-                return;
-            }
+                let last_image = Arc::clone(&last_image_mutex);
 
-            tx.send(AdvCaptureMessage::Progress(progress.update(format!("Capturing images for {exp_time}"))));
+                let dark_maps_mutex_clone = dark_maps_mutex.clone();
+                let defect_map_mutex_clone = defect_map_mutex.clone();
 
-            let capture_settings = CaptureSettingBuilder::new(*exp_time, Box::new(SequenceCapture {
-                num_frames: self.frames_per_capture as u32,
-            })).build();
-
-            detector_controller.run_capture_with_handler(capture_settings.clone(), | message | {
-                match message {
-                    CaptureMessage::CapturedImage(mut image) => {
-
-                        match apply_corrections(app.clone(), *exp_time, &mut image) {
-                            Err(e) => {
-                                error!("Error whilst applying corrections {}", e);
-                                tx.send(AdvCaptureMessage::Error);
-                                false
-                            },
-                            Ok(mut corrected_image) => {
-                                let mut image_buffer = corrected_image.to_image_buffer();
-
-                                let metadata = ImageMetadataBuilder::new()
-                                .capture_settings(capture_settings.clone())
-                                .extra_info(ExtraData::SignalAccumulationData(SignalAccumulationData { accumulated_exp_time: *exp_time}))
-                                .build();
-
-                                let captured_image = CapturedImage {
-                                    data: corrected_image.to_image_buffer(),
-                                    metadata
-                                };
-
-                                // Add the pixel values of last iamge to new image
-                                if let Some(prev) = images.last() {
-                                    for (current_pixel, prev_pixel) in
-                                        image_buffer.pixels_mut().zip(prev.data.pixels())
-                                    {
-                                        let sum = current_pixel[0].saturating_add(prev_pixel[0]);
-                                        // The 14-bit max value
-                                        if sum < 16384 {
-                                            current_pixel[0] = sum;
-                                        } else {
-                                            current_pixel[0] = 16383;
-                                        }
-                                    }
-                                }
-
-                                images.push(captured_image.clone());
-                                tx.send(AdvCaptureMessage::CapturedImage(captured_image));
-                                true
-                            }
+                detector_controller
+                    .run_capture_stream(
+                        capture_settings.clone(),
+                        dark_maps_mutex.clone(),
+                        defect_map_mutex.clone(),
+                    )
+                    .expect("Failed to run capture stream")
+                    .map(move |mut image| {
+                        let mut image_buffer = image.to_image_buffer();
+                        let mut lock = last_image.lock().unwrap();
+                        if let Some(ref mut prev) = *lock {
+                            image_buffer.pixels_mut().zip(prev.pixels()).for_each(
+                                |(current_pixel, prev_pixel)| {
+                                    current_pixel[0] = current_pixel[0]
+                                        .saturating_add(prev_pixel[0])
+                                        .min(MAX_PIXEL_VALUE);
+                                },
+                            );
                         }
-                    },
-                    _ => {
-                        false
-                    }
-                }
-            }).unwrap();
-        }
+                        ImageHandler::new(
+                            image_buffer,
+                            ImageMetadataBuilder::new()
+                                .capture_settings(capture_settings.clone())
+                                .extra_info(ExtraData::SignalAccumulationData(
+                                    SignalAccumulationData {
+                                        accumulated_exp_time: exp_time,
+                                    },
+                                ))
+                                .build(),
+                        )
+                    })
+            })
+            .collect::<Vec<_>>();
 
-        tx.send(AdvCaptureMessage::CaptureCompleted(images));
-
-        info!("Finished Signal Accumulation Capture");
+        stream::iter(streams).flatten().boxed()
     }
 }
 
 impl AdvCapture for MultiCapture {
-    fn start<T: Runtime>(
+    fn start_stream<T: Runtime>(
         &self,
         app: AppHandle<T>,
         detector_controller_mutex: Arc<Mutex<DetectorController>>,
-        tx: Sender<AdvCaptureMessage>,
+        dark_maps_mutex: Arc<Mutex<HashMap<u32, SLImageRs>>>,
+        defect_map_mutex: Arc<Mutex<Option<SLImageRs>>>,
         stop_signal: Arc<AtomicBool>,
-    ) {
+    ) -> Pin<Box<dyn Stream<Item = ImageHandler> + Send>> {
         info!("Starting Multi Capture");
+        let streams = self
+            .exp_times
+            .iter()
+            .map(|&exp_time| {
+                let mut detector_controller = detector_controller_mutex
+                    .lock()
+                    .expect("Failed to acquire detector controller lock");
 
-        let mut detector_controller = detector_controller_mutex.lock().unwrap();
-        let mut images = Vec::new();
+                let capture_settings = CaptureSettingBuilder::new(
+                    exp_time,
+                    Box::new(SequenceCapture { num_frames: 10 }),
+                )
+                .build();
 
-        for (i, exp_time) in self.exp_times.iter().enumerate() {
-            if self.check_stop_signal(&stop_signal, &tx, &mut *detector_controller) {
-                return;
-            }
+                let stop_signal_clone = stop_signal.clone();
 
-            let capture_mode = Box::new(SequenceCapture {
-                num_frames: self.frames_per_capture as u32,
-            });
+                detector_controller
+                    .run_capture_stream(
+                        capture_settings.clone(),
+                        dark_maps_mutex.clone(),
+                        defect_map_mutex.clone(),
+                    )
+                    .expect("Failed to run capture stream")
+                    .take_while(move |_| {
+                        let stop_signal_clone_inner = stop_signal_clone.clone();
+                        async move { !stop_signal_clone_inner.load(Ordering::Relaxed) }
+                    })
+                    .map(move |mut image| {
+                        ImageHandler::new(
+                            image.to_image_buffer(),
+                            ImageMetadata {
+                                capture_settings: Some(capture_settings.clone()),
+                                date_created: None,
+                                extra_info: None,
+                            },
+                        )
+                    })
+            })
+            .collect::<Vec<_>>();
 
-            let capture_settings = CaptureSettingBuilder::new(*exp_time, capture_mode).build();
-
-            detector_controller.run_capture_with_handler(capture_settings.clone(), |message| {
-                match message {
-                    CaptureMessage::CapturedImage(mut image) => {
-                        info!("Got multi capture image");
-                        match apply_corrections(app.clone(), *exp_time, &mut image) {
-                            Err(_) => {
-                                error!("Error whilst applying corrections with Multi Capture");
-                                false
-                            }
-                            Ok(mut corrected_image) => {
-                                let image_buffer = corrected_image.to_image_buffer();
-
-                                let metadata = ImageMetadata {
-                                    capture_settings: Some(capture_settings.clone()),
-                                    date_created: None,
-                                    extra_info: None,
-                                };
-
-                                let captured_image = CapturedImage {
-                                    data: image_buffer,
-                                    metadata,
-                                };
-
-                                images.push(captured_image.clone());
-                                tx.send(AdvCaptureMessage::CapturedImage(captured_image));
-                                true
-                            }
-                        }
-                    },
-                    CaptureMessage::CaptureCompleted => {
-                        true
-                    },
-                    CaptureMessage::CaptureCancelled => {
-                        false
-                    },
-                }
-            }).unwrap();
-        }
-
-        tx.send(AdvCaptureMessage::CaptureCompleted(images));
+        stream::iter(streams).flatten().boxed()
     }
-
 }
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{Arc, Mutex, mpsc::channel, atomic::AtomicBool};
+    use std::sync::{atomic::AtomicBool, mpsc::channel, Arc, Mutex};
 
-    use crate::{capture::{test_utils::test_utils::{create_app, setup_controller_handle}, types::AdvCapture, advanced_capture::SignalAccumulationCapture}, wrapper::{FullWellModesRS, FullWellModes}};
+    use futures_util::{pin_mut, StreamExt};
 
-    use super::{DarkMapCapture, AdvCaptureMessage, DefectMapCapture, SmartCapture};
-
-    #[test]
-    fn dark_capture() {
-        let app = create_app(tauri::test::mock_builder());
-        let controller = Arc::new(Mutex::new(setup_controller_handle(app.handle().clone())));
-
-        let dark_capture = DarkMapCapture {
-            exp_times: vec![100, 200, 500],
-            frames_per_capture: 10,
-        };
-
-        let (tx, rx) = channel();
-        let stop_signal = Arc::new(AtomicBool::new(false));
-
-        dark_capture.start(app.handle().clone(), controller, tx, stop_signal.clone());
-        
-        for recv in rx.iter() {
-            match recv {
-                AdvCaptureMessage::CapturedImage(image) => {
-                    println!("got image!");
-                },
-                AdvCaptureMessage::CaptureCompleted(_) => {
-                    println!("completed!");
-                    break;
-                },
-                AdvCaptureMessage::Progress(_) => {},
-                AdvCaptureMessage::Stopped => {},
-                AdvCaptureMessage::Error => {},
-            }
-        }
-    }
-
-    #[test]
-    fn defect_map_capture() {
-        let app = create_app(tauri::test::mock_builder());
-        let controller = Arc::new(Mutex::new(setup_controller_handle(app.handle().clone())));
-
-        let defect_map_capture = DefectMapCapture {
-            dark_exp_times: vec![100, 200, 300],
-            full_well_modes: vec![FullWellModesRS { remote_ty: FullWellModes::High}],
-            frames_per_capture: 1
-        };
-
-        let (tx, rx) = channel();
-        let stop_signal = Arc::new(AtomicBool::new(false));
-
-        defect_map_capture.start(app.handle().clone(), controller, tx, stop_signal.clone());
-        
-        for recv in rx.iter() {
-            match recv {
-                AdvCaptureMessage::CapturedImage(image) => {
-                    println!("got image!");
-                },
-                AdvCaptureMessage::CaptureCompleted(_) => {
-                    println!("completed!");
-                    break;
-                },
-                AdvCaptureMessage::Progress(_) => {},
-                AdvCaptureMessage::Stopped => {},
-                AdvCaptureMessage::Error => {},
-            }
-        }
-    }
-
-    #[test]
-    fn smart_capture() {
+    use crate::{
+        capture::{
+            advanced_capture::{SignalAccumulationCapture, SmartCapture},
+            capture_manager::CaptureManager,
+            test_utils::test_utils::{create_app, setup_controller_handle},
+            types::AdvCapture,
+        },
+        wrapper::{FullWellModes, FullWellModesRS},
+    };
+    /*
+    #[tokio::test]
+    async fn smart_capture() {
         let app = create_app(tauri::test::mock_builder());
         let controller = Arc::new(Mutex::new(setup_controller_handle(app.handle().clone())));
 
@@ -543,56 +304,50 @@ mod tests {
             exp_times: vec![100, 200, 300],
             frames_per_capture: 10,
             median_filtered: false,
-            window_size: 5
+            window_size: 5,
         };
 
-        let (tx, rx) = channel();
+        let count = smart_capture.exp_times.len() as u32 * smart_capture.frames_per_capture;
+
         let stop_signal = Arc::new(AtomicBool::new(false));
-        smart_capture.start(app.handle().clone(), controller, tx, stop_signal.clone());
-        for recv in rx.iter() {
-            match recv {
-                AdvCaptureMessage::CapturedImage(image) => {
-                    println!("got image!");
-                },
-                AdvCaptureMessage::CaptureCompleted(_) => {
-                    println!("completed!");
-                    break;
-                },
-                AdvCaptureMessage::Progress(_) => {},
-                AdvCaptureMessage::Stopped => {},
-                AdvCaptureMessage::Error => {},
-            }
+        let stream =
+            smart_capture.start_stream(app.handle().clone(), controller, stop_signal.clone());
+        pin_mut!(stream);
+
+        let mut counter = 0;
+        while let Some(_) = stream.next().await {
+            counter += 1;
         }
+
+        assert_eq!(counter, count);
     }
 
-    #[test]
-    fn signal_accumulation_captue() {
+
+    #[tokio::test]
+    async fn signal_accumulation_captue() {
         let app = create_app(tauri::test::mock_builder());
-        let controller = Arc::new(Mutex::new(setup_controller_handle(app.handle().clone())));
+        let controller = Arc::new(Mutex::new(CaptureManager::new()));
 
         let signal_accumulation_capture = SignalAccumulationCapture {
             exp_times: vec![100, 200, 300],
-            frames_per_capture: 10
+            frames_per_capture: 10,
         };
 
-        let (tx, rx) = channel();
+        let count = signal_accumulation_capture.exp_times.len() as u32
+            * signal_accumulation_capture.frames_per_capture;
+
         let stop_signal = Arc::new(AtomicBool::new(false));
 
-        signal_accumulation_capture.start(app.handle().clone(), controller, tx, stop_signal.clone());
+        let stream =
+            signal_accumulation_capture.start_stream(app.handle().clone(), controller, stop_signal);
+        pin_mut!(stream);
 
-        for recv in rx.iter() {
-            match recv {
-                AdvCaptureMessage::CapturedImage(image) => {
-                    println!("got image!");
-                },
-                AdvCaptureMessage::CaptureCompleted(_) => {
-                    println!("completed!");
-                    break;
-                },
-                AdvCaptureMessage::Progress(_) => {},
-                AdvCaptureMessage::Stopped => {},
-                AdvCaptureMessage::Error => {},
-            }
+        let mut counter = 0;
+        while let Some(_) = stream.next().await {
+            counter += 1;
         }
+
+        assert_eq!(counter, count);
     }
+    */
 }

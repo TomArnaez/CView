@@ -1,13 +1,10 @@
-use crate::appdata::AppData;
-use crate::capture::advanced_capture::DarkMapCapture;
-use crate::capture::capture_manager::AdvCaptureMessage;
-use crate::capture::types::CaptureProgressEvent;
 use crate::events::StreamCaptureEvent;
-use crate::image::{ImageHandler, ImageStack};
+use crate::image::ImageHandler;
+use crate::image::ImageStack;
 use crate::ImageService;
 use crate::StreamBuffer;
 use chrono::Utc;
-use log::error;
+use futures_util::{pin_mut, StreamExt};
 use log::info;
 use std::sync::Mutex;
 use tauri::ipc::Response;
@@ -21,62 +18,44 @@ use super::types::AdvancedCapture;
 
 #[tauri::command(async)]
 #[specta::specta]
-pub fn run_capture(
+pub async fn run_capture(
     app: AppHandle,
-    image_service_mutex: State<Mutex<ImageService>>,
-    stream_buffer_mutex: State<Mutex<StreamBuffer>>,
-    capture_manager_mutex: State<Mutex<CaptureManager>>,
+    image_service_mutex: State<'_, Mutex<ImageService>>,
+    stream_buffer_mutex: State<'_, Mutex<StreamBuffer>>,
+    capture_manager_mutex: State<'_, Mutex<CaptureManager>>,
     capture: AdvancedCapture,
 ) -> Result<(), CaptureError> {
     info!("Called Run Capture with {:?}", capture);
 
-    let mut capture_manager = capture_manager_mutex.lock().unwrap();
-    let rx = capture_manager.run_capture(app.clone(), capture.clone())?;
-    drop(capture_manager);
+    let stream = capture_manager_mutex
+        .lock()
+        .unwrap()
+        .start_capture(app.clone(), capture.clone())?;
 
-    loop {
-        match rx.recv() {
-            Ok(message) => match message {
-                AdvCaptureMessage::CapturedImage(image) => {
-                    let mut image_handler = ImageHandler::new(image.data, image.metadata);
-                    //image_handler.apply_histogram_equilization();
-                    let stream_buffer = stream_buffer_mutex.lock().unwrap();
-                    stream_buffer.q.push(image_handler);
-                    StreamCaptureEvent().emit_all(&app).unwrap();
-                }
-                AdvCaptureMessage::CaptureCompleted(vec) => {
-                    let mut image_handlers = Vec::new();
-                    for image in vec {
-                        let mut image_handler = ImageHandler::new(image.data, image.metadata);
-                        image_handler.apply_histogram_equilization();
-                        image_handlers.push(image_handler);
-                    }
+    pin_mut!(stream);
 
-                    let mut image_service = image_service_mutex.lock().unwrap();
-                    image_service.add_image_stack(ImageStack {
-                        timestamp: Some(Utc::now()),
-                        image_handlers,
-                        capture: Some(capture),
-                    });
+    let mut image_handlers: Vec<ImageHandler> = Vec::new();
 
-                    info!("finished");
-                    break;
-                }
-                AdvCaptureMessage::Error => return Err(CaptureError::DetectorDisconnected),
-                AdvCaptureMessage::Progress(progress) => {
-                    CaptureProgressEvent(progress).emit_all(&app).unwrap();
-                }
-                AdvCaptureMessage::Stopped => return Ok(()),
-            },
-            Err(e) => {
-                error!(
-                    "Receiving advanced capture message crashed with error {}",
-                    e
-                );
-                return Err(CaptureError::DetectorDisconnected);
-            }
-        }
+    while let Some(image_handler) = stream.next().await {
+        let image_handler_clone = ImageHandler::new(
+            image_handler.image.clone(),
+            image_handler.image_metadata.clone(),
+        );
+        image_handlers.push(image_handler_clone);
+
+        let stream_buffer = stream_buffer_mutex.lock().unwrap();
+        stream_buffer.q.push(image_handler);
+        StreamCaptureEvent().emit_all(&app).unwrap();
     }
+
+    image_service_mutex
+        .lock()
+        .unwrap()
+        .add_image_stack(ImageStack {
+            timestamp: Some(Utc::now()),
+            image_handlers,
+            capture: Some(capture),
+        });
 
     Ok(())
 }
@@ -102,48 +81,33 @@ pub fn read_stream_buffer(stream_buffer_mutex: State<Mutex<StreamBuffer>>) -> Re
 
 #[tauri::command(async)]
 #[specta::specta]
-pub fn generate_dark_maps(
+pub async fn generate_dark_maps(
     app: AppHandle,
-    app_data_mutex: State<Mutex<AppData>>,
-    capture_manager_mutex: State<Mutex<CaptureManager>>,
+    capture_manager_mutex: State<'_, Mutex<CaptureManager>>,
 ) -> Result<(), CaptureError> {
-    info!("Generating Dark Maps");
-    let capture = AdvancedCapture::DarkMapCapture(DarkMapCapture {
-        exp_times: vec![100, 200],
+    /*
+    let dark_map_capture = AdvancedCapture::DarkMapCapture(DarkMapCapture {
+        exp_times: vec![100, 200, 300],
         frames_per_capture: 10,
     });
 
-    let mut capture_manager = capture_manager_mutex.lock().unwrap();
-    let rx = capture_manager.run_capture(app.clone(), capture.clone())?;
+    let stream = capture_manager_mutex
+        .lock()
+        .unwrap()
+        .start_capture(app.clone(), dark_map_capture.clone())?;
 
-    loop {
-        match rx.recv() {
-            Ok(message) => match message {
-                AdvCaptureMessage::CapturedImage(_) => {}
-                AdvCaptureMessage::CaptureCompleted(dark_maps) => {
-                    info!("Finished generating dark maps");
+    pin_mut!(stream);
 
-                    info!("{}", dark_maps.len());
+    let mut image_handlers: Vec<ImageHandler> = Vec::new();
 
-                    let mut app_data = app_data_mutex.lock().unwrap();
-                    match app_data.set_dark_maps(app.clone(), dark_maps) {
-                        Ok(()) => info!("Succesfully saved dark maps"),
-                        Err(()) => {
-                            error!("Couldn't save dark maps");
-                            break;
-                        }
-                    }
-                }
-                AdvCaptureMessage::Error => return Err(CaptureError::Unknown),
-                AdvCaptureMessage::Progress(p) => {}
-                AdvCaptureMessage::Stopped => return Ok(()),
-            },
-            Err(e) => {
-                error!("Receiving image crashed with error {}", e);
-                return Err(CaptureError::Unknown);
-            }
-        }
+    while let Some(image_handler) = stream.next().await {
+        let image_handler_clone = ImageHandler::new(
+            image_handler.image.clone(),
+            image_handler.image_metadata.clone(),
+        );
+        image_handlers.push(image_handler_clone);
     }
+    */
 
     Ok(())
 }

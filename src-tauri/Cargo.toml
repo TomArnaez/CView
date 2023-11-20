@@ -51,6 +51,11 @@ async-trait = "0.1.74"
 serde_with = "3.4.0"
 tauri-bindgen-host = { git = "https://github.com/tauri-apps/tauri-bindgen", version = "0.2.0" }
 uuid = "1.5.0"
+async-traits = "0.0.0"
+futures-core = "0.3.29"
+futures-util = "0.3.29"
+async-stream = "0.3.5"
+futures = "0.3.29"
 
 
 [features]

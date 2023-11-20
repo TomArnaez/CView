@@ -11,6 +11,8 @@ use tauri_specta::Event;
 #[tauri::command(async)]
 #[specta::specta]
 pub fn startup(app: AppHandle, app_data_mutex: State<Mutex<AppData>>) {
+    let c = tauri::ipc::Response::new(vec![100]);
+
     info!("Startup command called");
     let app_data = app_data_mutex.lock().unwrap();
     match AppDataEvent(app_data.clone()).emit_all(&app) {

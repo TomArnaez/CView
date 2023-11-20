@@ -108,9 +108,8 @@ impl SLDeviceRS {
         let mut lock = self.device.lock().unwrap();
         match lock.pin_mut().SetFullWell(full_well.remote_ty) {
             SLError::SL_ERROR_SUCCESS => Ok(()),
-            err => Err(err.into())
+            err => Err(err.into()),
         }
-
     }
 
     pub fn open_camera(&mut self, buffer_depth: u32) -> Result<(), InternalSLError> {
@@ -167,7 +166,7 @@ impl SLDeviceRS {
 
     pub fn read_buffer(
         &mut self,
-        buffer: *mut u8,
+        buffer: &mut SLImageRs,
         buf_num: u32,
         timeout: u32,
     ) -> Result<(), InternalSLError> {
@@ -175,7 +174,7 @@ impl SLDeviceRS {
             let mut lock = self.device.lock().unwrap();
 
             match lock.pin_mut().ReadBuffer(
-                buffer,
+                buffer.get_data_pointer(0),
                 autocxx::c_int(buf_num as i32),
                 autocxx::c_int(timeout as i32),
             ) {
@@ -204,6 +203,8 @@ impl SLDeviceRS {
 pub struct SLImageRs {
     image: UniquePtr<SLImage>,
 }
+unsafe impl Send for SLImageRs {}
+unsafe impl Sync for SLImageRs {}
 
 impl SLImageRs {
     fn get_underlying(&mut self) -> &mut UniquePtr<SLImage> {
@@ -217,13 +218,16 @@ impl SLImageRs {
         }
     }
 
-    /*
-    pub fn new_from_tiff(tiff_path: PathBuf) -> Self {
+    pub fn new_depth(height: u32, width: u32, depth: u32) -> Self {
         Self {
-            image: SLImage::new4(tiff_path.to_str().unwrap()).within_unique_ptr(),
+            image: SLImage::new3(
+                autocxx::c_int(width as i32),
+                autocxx::c_int(height as i32),
+                autocxx::c_int(depth as i32),
+            )
+            .within_unique_ptr(),
         }
     }
-    */
 
     pub fn read_tiff_image(&mut self, path: &PathBuf) -> Result<(), ()> {
         if SLImage::ReadTiffImage(path.to_str().unwrap(), self.image.pin_mut()) {
@@ -266,7 +270,7 @@ impl SLImageRs {
                     autocxx::c_int(offset as i32),
                 ) {
                     SLError::SL_ERROR_SUCCESS => Ok(()),
-                    e => Err(e.into())
+                    e => Err(e.into()),
                 }
             }
         }
@@ -286,7 +290,7 @@ impl SLImageRs {
                 ),
             ) {
                 SLError::SL_ERROR_SUCCESS => Ok(()),
-                e => Err(e.into())
+                e => Err(e.into()),
             }
         }
     }
@@ -330,7 +334,7 @@ pub enum RemoteBinningModes {
     BinningUnknown,
     x11,
     x22,
-    x44
+    x44,
 }
 
 #[derive(Serialize, Type, Deserialize, Clone)]
@@ -342,7 +346,7 @@ impl Serialize for BinningModes {
             BinningModes::BinningUnknown => serializer.serialize_str("Unknown"),
             BinningModes::x11 => serializer.serialize_str("x11"),
             BinningModes::x22 => serializer.serialize_str("x22"),
-            BinningModes::x44 => serializer.serialize_str("x44")
+            BinningModes::x44 => serializer.serialize_str("x44"),
         }
     }
 }
@@ -365,12 +369,16 @@ impl<'de> Deserialize<'de> for BinningModes {
 
 impl fmt::Debug for BinningModesRS {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", match self.0 {
-            BinningModes::BinningUnknown => "Unknown",
-            BinningModes::x11 => "x11",
-            BinningModes::x22 => "x22",
-            BinningModes::x44 => "x44",
-        })
+        write!(
+            f,
+            "{}",
+            match self.0 {
+                BinningModes::BinningUnknown => "Unknown",
+                BinningModes::x11 => "x11",
+                BinningModes::x22 => "x22",
+                BinningModes::x44 => "x44",
+            }
+        )
     }
 }
 
@@ -378,7 +386,7 @@ impl fmt::Debug for BinningModesRS {
 pub enum RemoteFullWellModes {
     High,
     Low,
-    Enum
+    Enum,
 }
 
 #[derive(Serialize, Type, Deserialize, Clone)]
@@ -389,11 +397,15 @@ pub struct FullWellModesRS {
 
 impl fmt::Display for FullWellModesRS {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", match self.remote_ty {
-            FullWellModes::Low => "LFW",
-            FullWellModes::High => "HFW",
-            FullWellModes::Unknown => "Uknown",
-        })
+        write!(
+            f,
+            "{}",
+            match self.remote_ty {
+                FullWellModes::Low => "LFW",
+                FullWellModes::High => "HFW",
+                FullWellModes::Unknown => "Uknown",
+            }
+        )
     }
 }
 
@@ -405,7 +417,9 @@ impl fmt::Debug for FullWellModesRS {
 
 impl Serialize for FullWellModes {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let b = FullWellModesRS { remote_ty: FullWellModes::High};
+        let b = FullWellModesRS {
+            remote_ty: FullWellModes::High,
+        };
         match self {
             FullWellModes::High => serializer.serialize_str("High"),
             FullWellModes::Low => serializer.serialize_str("Low"),

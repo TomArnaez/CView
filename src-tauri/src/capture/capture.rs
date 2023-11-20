@@ -1,15 +1,19 @@
 use std::{
     fmt,
+    pin::Pin,
     sync::mpsc::{channel, Receiver},
     thread,
     time::{Duration, Instant},
 };
 
+use async_stream::stream;
+use async_trait::async_trait;
+use futures_core::stream::Stream;
+use futures_util::StreamExt;
 use log::{debug, error, info};
 use serde::Serialize;
 use specta::Type;
 use thiserror::Error;
-use tokio_util::sync::CancellationToken;
 
 use crate::wrapper::{
     BinningModes, BinningModesRS, ExposureModes, FullWellModes, FullWellModesRS, InternalSLError,
@@ -41,12 +45,8 @@ pub enum CaptureError {
     #[error("Error")]
     Unknown,
 }
-
-pub enum CaptureMessage {
-    CapturedImage(SLImageRs),
-    CaptureCompleted,
-    CaptureCancelled,
-}
+unsafe impl Send for CaptureSetting {}
+unsafe impl Sync for CaptureSetting {}
 
 #[derive(Serialize, Type)]
 pub struct CaptureSetting {
@@ -58,6 +58,7 @@ pub struct CaptureSetting {
     pub full_well: FullWellModesRS,
     pub binning_mode: BinningModesRS,
     pub roi: Option<Vec<u32>>,
+    pub corrected: bool,
 }
 
 // Manual implementation of Debug
@@ -83,13 +84,15 @@ impl Clone for CaptureSetting {
             full_well: self.full_well.clone(),
             binning_mode: self.binning_mode.clone(),
             roi: self.roi.clone(),
+            corrected: self.corrected,
         }
     }
 }
 
 pub struct CaptureSettingBuilder {
+    corrected: bool,
     exp_time: u32,
-    capture_mode: Box<dyn Capture + Send + 'static>,
+    capture_mode: Box<dyn Capture + Send + Sync + 'static>,
     dds: bool,
     full_well: FullWellModesRS,
     binning_mode: BinningModesRS,
@@ -97,8 +100,9 @@ pub struct CaptureSettingBuilder {
 }
 
 impl CaptureSettingBuilder {
-    pub fn new(exp_time: u32, capture_mode: Box<dyn Capture + Send + 'static>) -> Self {
+    pub fn new(exp_time: u32, capture_mode: Box<dyn Capture + Send + Sync + 'static>) -> Self {
         CaptureSettingBuilder {
+            corrected: true,
             exp_time,
             capture_mode,
             dds: false,
@@ -108,6 +112,11 @@ impl CaptureSettingBuilder {
             binning_mode: BinningModesRS(BinningModes::x11),
             roi: None,
         }
+    }
+
+    pub fn corrected(mut self, corrected: bool) -> Self {
+        self.corrected = corrected;
+        self
     }
 
     pub fn dds(mut self, dds: bool) -> Self {
@@ -133,16 +142,17 @@ impl CaptureSettingBuilder {
             full_well: self.full_well,
             dds: self.dds,
             roi: self.roi,
+            corrected: self.corrected,
         }
     }
 }
 
 pub trait Capture {
-    fn start(
+    fn stream_results(
         &self,
+        exp_time: u32,
         detector: SLDeviceRS,
-        cancellation_token: CancellationToken,
-    ) -> Result<Receiver<CaptureMessage>, CaptureError>;
+    ) -> Result<Pin<Box<dyn Stream<Item = SLImageRs> + Send>>, CaptureError>;
 
     fn clone_box(&self) -> Box<dyn Capture + Send + 'static>;
 }
@@ -158,53 +168,35 @@ pub struct StreamCapture {
 }
 
 impl Capture for SequenceCapture {
-    fn start(
+    fn stream_results(
         &self,
+        exp_time: u32,
         mut detector: SLDeviceRS,
-        cancellation_token: CancellationToken,
-    ) -> Result<Receiver<CaptureMessage>, CaptureError> {
-        info!("Capturing sequence");
-        detector.set_exposure_mode(ExposureModes::seq_mode)?;
-        detector.set_number_frames(self.num_frames as u32)?;
-        detector.go_live()?;
-        detector.software_trigger()?;
-
-        let (tx, rx) = channel();
+    ) -> Result<Pin<Box<dyn Stream<Item = SLImageRs> + Send>>, CaptureError> {
+        println!("Setting up a sequence stream");
         let capture = self.clone();
-        std::thread::spawn(move || {
-            info!("Spawned Seqence Capture thread");
-            for frame_num in 0..capture.num_frames {
-                if cancellation_token.is_cancelled() {
-                    println!("cancelled");
-                    detector.go_unlive(true);
-                    tx.send(CaptureMessage::CaptureCancelled);
-                    break;
-                }
 
+        let stream = stream! {
+            println!("Running sequence stream");
+            detector.set_exposure_time(exp_time);
+            detector.set_exposure_mode(ExposureModes::seq_mode);
+            detector.set_number_frames(capture.num_frames as u32);
+            detector.go_live();
+            detector.software_trigger();
+
+            for frame_num in 0.. capture.num_frames {
                 let mut image = SLImageRs::new(
                     detector.image_height().unwrap(),
                     detector.image_width().unwrap(),
                 );
-                let data_ptr = image.get_data_pointer(0);
 
-                if detector
-                    .read_buffer(data_ptr as *mut u8, frame_num as u32, 1000)
-                    .is_err()
-                {
-                    error!("Failed to read buffer {frame_num}");
-                } else {
-                    match tx.send(CaptureMessage::CapturedImage(image)) {
-                        Ok(_) => info!("Successfuly sent frame {frame_num}"),
-                        Err(e) => error!("Error whilst sending frame {frame_num} with error {e}"),
-                    };
-                }
+                while detector.read_buffer(&mut image, frame_num as u32, 100).is_err() {}
+                yield image;
             }
 
-            tx.send(CaptureMessage::CaptureCompleted);
             detector.go_unlive(true);
-            info!("Finished sequence capture");
-        });
-        Ok(rx)
+        };
+        Ok(stream.boxed())
     }
 
     fn clone_box(&self) -> Box<dyn Capture + Send + 'static> {
@@ -213,47 +205,31 @@ impl Capture for SequenceCapture {
 }
 
 impl Capture for StreamCapture {
-    fn start(
+    fn stream_results(
         &self,
+        exp_time: u32,
         mut detector: SLDeviceRS,
-        cancellation_token: CancellationToken,
-    ) -> Result<Receiver<CaptureMessage>, CaptureError> {
-        let start_time = Instant::now();
-
-        let (tx, rx) = channel();
+    ) -> Result<Pin<Box<dyn Stream<Item = SLImageRs> + Send>>, CaptureError> {
         let capture = self.clone();
 
-        detector.start_stream(100);
-
-        tauri::async_runtime::spawn(async move {
-            while !cancellation_token.is_cancelled()
-                && (capture.duration.is_none() || start_time.elapsed() < capture.duration.unwrap())
-            {
+        let stream = stream! {
+            let start_time = Instant::now();
+            detector.start_stream(exp_time);
+            while capture.duration.is_none() || start_time.elapsed() < capture.duration.unwrap() {
                 let mut image: SLImageRs = SLImageRs::new(
                     detector.image_height().unwrap(),
                     detector.image_width().unwrap(),
                 );
 
                 thread::sleep(Duration::from_millis(1));
-
                 if detector.read_frame(image.get_data_pointer(0), true) {
-                    match tx.send(CaptureMessage::CapturedImage(image)) {
-                        Ok(_) => {
-                            debug!("Image sent from sequence capture")
-                        }
-                        Err(e) => {
-                            error!("Failed to data image frame through channel whilst streaming with error {}", e)
-                        }
-                    }
+                    yield image;
                 }
             }
-
             detector.go_unlive(true);
-            tx.send(CaptureMessage::CaptureCompleted);
-            info!("Finished stream capture");
-        });
+        };
 
-        Ok(rx)
+        Ok(stream.boxed())
     }
 
     fn clone_box(&self) -> Box<dyn Capture + Send + 'static> {

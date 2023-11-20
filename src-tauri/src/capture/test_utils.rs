@@ -1,23 +1,21 @@
-
 pub mod test_utils {
     use std::time::Duration;
 
-    use tauri::{Manager, AppHandle, test::MockRuntime};
-    use tauri_plugin_log::{TargetKind, fern::colors::ColoredLevelConfig, Target};
+    use tauri::{test::MockRuntime, AppHandle};
+    use tauri_plugin_log::{fern::colors::ColoredLevelConfig, Target, TargetKind};
 
-    use crate::capture::detector::DetectorController;
-
+    use crate::capture::{detector::DetectorController, types::CaptureManagerEvent};
 
     pub fn create_app<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::App<R> {
+        let specta_builder =
+            tauri_specta::ts::builder().events(tauri_specta::collect_events!(CaptureManagerEvent));
+
         builder
-            .setup(|_| {
-                Ok(())
-            })
+            .setup(|_| Ok(()))
+            .plugin(specta_builder.into_plugin())
             .plugin(
                 tauri_plugin_log::Builder::default()
-                    .targets([
-                        Target::new(TargetKind::Stdout),
-                    ])
+                    .targets([Target::new(TargetKind::Stdout)])
                     .with_colors(ColoredLevelConfig::default())
                     .build(),
             )
