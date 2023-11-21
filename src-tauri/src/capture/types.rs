@@ -35,14 +35,14 @@ pub struct DetectorInfo {
 #[derive(Type, Serialize, Debug, Clone, PartialEq)]
 pub enum CaptureManagerStatus {
     Available,
-    Capturing,
+    Capturing(AdvancedCapture),
     DarkMapsRequired,
     DefectMapsRequired,
     DetectorDisconnected,
 }
 
 #[enum_dispatch(AdvCapture)]
-#[derive(Clone, Serialize, Deserialize, Type, Debug)]
+#[derive(Clone, Serialize, Deserialize, Type, Debug, PartialEq)]
 #[serde(tag = "type")]
 pub enum AdvancedCapture {
     SmartCapture,

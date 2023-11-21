@@ -20,23 +20,13 @@ pub enum CorrectionError {
 
 pub fn run_defect_map_gen(images_dir: &PathBuf, exe_dir: &PathBuf) -> Result<PathBuf, ()> {
     let args = [images_dir.to_str().unwrap(), "1", "0", "-f", "-a", "-p"];
-    let output = Command::new(exe_dir).args(args).creation_flags(CREATE_NO_WINDOW).spawn();
+    let mut cmd = Command::new(exe_dir);
+    let cmd = cmd.args(args).creation_flags(CREATE_NO_WINDOW);
 
-    match output {
-        Ok(mut child) => {
-            let status = child.wait().expect("Failed to wait for the process");
-            if status.success() {
-                Ok(images_dir.join("GlobalDefectMap.tif"))
-            } else {
-                error!("Process failed with exit code: {}", status);
-                Err(())
-            }
-        }
-        Err(e) => {
-            error!("Error running run defect map gen command: {e}");
-            Err(())
-        }
+    if (cmd.spawn().unwrap().wait().is_ok()) {
+        return Ok(images_dir.join("GlobalDefectMap.tif"));
     }
+    Err(())
 }
 
 #[cfg(test)]
@@ -54,7 +44,7 @@ mod tests {
         let app = create_app(tauri::test::mock_builder());
         let images_dir = app.path().app_local_data_dir().unwrap().join("DefectMap");
         let exe_dir = PathBuf::from(
-            "C:\\dev\\repos\\CView\\src-tauri\\target\\debug\\resources\\DefectMapGeneration",
+            "C:\\Program Files\\cview\\resources\\DefectMapGeneration\\DefectMapGen.exe",
         );
         let log_dir = app.path().app_log_dir().unwrap();
         println!("{}", log_dir.display());

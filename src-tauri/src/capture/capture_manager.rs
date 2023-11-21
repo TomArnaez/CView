@@ -19,7 +19,6 @@ use tauri_specta::Event;
 
 use crate::{
     capture::corrections::run_defect_map_gen,
-    image::ImageHandler,
     wrapper::*,
 };
 
@@ -29,11 +28,10 @@ use super::{
     types::{
         AdvCapture, AdvancedCapture, CaptureManagerEvent, CaptureManagerEventPayload,
         CaptureManagerInfo, CaptureManagerStatus, CaptureStreamItem,
-    },
+    }, advanced_capture::{DarkMapCapture, LiveCapture},
 };
 
 pub struct CaptureManager {
-    capture_handle: Arc<Mutex<Option<JoinHandle<()>>>>,
     detector_controller: Arc<Mutex<DetectorController>>,
     stop_signal: Arc<AtomicBool>,
     info: Arc<Mutex<CaptureManagerInfo>>,
@@ -71,7 +69,6 @@ impl CaptureManager {
         ));
 
         Self {
-            capture_handle: Arc::new(Mutex::new(None)),
             detector_controller: Arc::new(Mutex::new(detector_controller)),
             stop_signal: Arc::new(AtomicBool::new(false)),
             info,
@@ -90,7 +87,7 @@ impl CaptureManager {
         let info = self.info.clone();
         let stop_signal_clone: Arc<AtomicBool> = self.stop_signal.clone();
 
-        info.lock().unwrap().status = CaptureManagerStatus::Capturing;
+        info.lock().unwrap().status = CaptureManagerStatus::Capturing(AdvancedCapture::LiveCapture(LiveCapture { exp_time: 100}));;
 
         tauri::async_runtime::spawn(async move {
             stream::iter(exp_times)
@@ -165,10 +162,10 @@ impl CaptureManager {
         let info = self.info.clone();
 
         let stop_signal_clone: Arc<AtomicBool> = self.stop_signal.clone();
-        info.lock().unwrap().status = CaptureManagerStatus::Capturing;
+        info.lock().unwrap().status = CaptureManagerStatus::Capturing(AdvancedCapture::LiveCapture(LiveCapture { exp_time: 100}));
 
         tauri::async_runtime::spawn(async move {
-            info.lock().unwrap().status = CaptureManagerStatus::Capturing;
+            info.lock().unwrap().status = CaptureManagerStatus::Capturing(AdvancedCapture::LiveCapture(LiveCapture { exp_time: 100}));
             stream::iter(dark_exp_times)
                 .flat_map(|exp_time| {
                     let full_well_modes = [
@@ -269,7 +266,8 @@ impl CaptureManager {
             let mut info = info.lock().unwrap();
             match status {
                 DetectorStatus::Available => {
-                    if info.status == CaptureManagerStatus::Capturing {
+                    if matches!(info.status, CaptureManagerStatus::Capturing(_)) {
+                        info!("got here");
                     } else {
                         if dark_maps.lock().unwrap().len() == 0 {
                             info.status = CaptureManagerStatus::DarkMapsRequired
@@ -292,13 +290,17 @@ impl CaptureManager {
                 .keys()
                 .cloned()
                 .collect::<Vec<u32>>();
+            
             exposure_times.sort();
-            CaptureManagerEvent(CaptureManagerEventPayload {
+            
+            match CaptureManagerEvent(CaptureManagerEventPayload {
                 dark_maps: exposure_times,
                 status: info.status.clone(),
             })
-            .emit_all(&app)
-            .unwrap();
+            .emit_all(&app) {
+                Err(e) => error!("Error when emitting capture manager event {e}"),
+                _ => {}
+            }
         }
     }
 
@@ -330,7 +332,7 @@ impl CaptureManager {
             return Err(CaptureError::DetectorDisconnected);
         }
 
-        self.info.lock().unwrap().status = CaptureManagerStatus::Capturing;
+        self.info.lock().unwrap().status = CaptureManagerStatus::Capturing(capture.clone());
         self.emit_event(app.clone());
 
         self.stop_signal.store(false, Ordering::SeqCst);
@@ -348,8 +350,6 @@ impl CaptureManager {
 
     pub fn stop_capture(&self) {
         self.stop_signal.store(true, Ordering::SeqCst);
-        let mut capture_guard = self.capture_handle.lock().unwrap();
-        *capture_guard = None;
     }
 
     fn emit_event<T: Runtime>(&self, app: AppHandle<T>) {

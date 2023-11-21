@@ -1,21 +1,24 @@
 use futures_core::stream::Stream;
 use futures_util::StreamExt;
-use log::{error, info};
+use log::{error, info, debug};
 use serde::Serialize;
 use specta::Type;
 use std::{
     collections::HashMap,
-    future::{Future, self},
+    future::{self},
     pin::Pin,
     sync::{Arc, Mutex, atomic::AtomicBool},
     thread,
-    time::Duration, path::PathBuf,
+    time::Duration
 };
 use tokio_util::sync::CancellationToken;
 
 use crate::wrapper::{SLDeviceRS, SLImageRs};
 
 use super::capture::{CaptureError, CaptureSetting};
+
+// Required for opening camera on a detector
+const BUFFER_DEPTH: u32 = 100;
 
 #[derive(PartialEq, Clone, Serialize, Debug, Type)]
 pub enum DetectorStatus {
@@ -75,7 +78,7 @@ impl DetectorController {
                         .unwrap()
                         .get_mut(&capture_settings.exp_time)
                     {
-                        info!("Dark correcting!");
+                        info!("Dark Correction Successful");
                         image.offset_correction(&mut dark_map, 300);
                     } else {
                         error!("Couldn't access dark map");
@@ -115,17 +118,17 @@ impl DetectorController {
         info!("Launching heartbeat thread");
         tauri::async_runtime::spawn(async move {
             loop {
-                thread::sleep(Duration::from_millis(500));
+                thread::sleep(Duration::from_millis(100));
 
                 let mut detector_status = detector_status_mutex.lock().unwrap();
 
                 match *detector_status {
                     DetectorStatus::Disconnected => {
-                        if detector.open_camera(100).is_ok() {
-                            info!("Connected to device");
-                            *detector_status = DetectorStatus::Available;
-                        } else {
-                            info!("can't open camera");
+                        match detector.open_camera(100) {
+                            Ok(_) => {
+                                info!("Connected to device");
+                            },
+                            Err(e) => debug!("Error opening camera")
                         }
                     }
                     DetectorStatus::Available | DetectorStatus::Capturing => {
@@ -150,10 +153,6 @@ mod tests {
     use std::pin::{self, Pin};
     use std::sync::atomic::AtomicBool;
     use std::sync::{Arc, Mutex};
-    use std::time::Duration;
-
-    use crate::capture::advanced_capture::{MultiCapture, SignalAccumulationCapture};
-    use crate::capture::capture::{CaptureSettingBuilder, SequenceCapture, StreamCapture};
     use crate::capture::types::AdvCapture;
     use crate::wrapper::{ExposureModes, SLDeviceRS, SLImageRs};
 

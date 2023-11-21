@@ -1,6 +1,8 @@
 use crate::image::Annotation;
 use crate::image::ImageService;
 use image::EncodableLayout;
+use image::codecs::png::FilterType;
+use image::imageops;
 use log::info;
 use std::sync::Mutex;
 use tauri::ipc::Response;
@@ -12,15 +14,14 @@ pub fn get_image_binary(
     image_service_mutex: State<'_, Mutex<ImageService>>,
     stack_idx: u32,
     image_idx: u32,
-    resize: bool,
+    resize_size: Option<u32>,
 ) -> Response {
     let image_service = image_service_mutex.lock().unwrap();
 
     if let Some(image_handler) = image_service.get_handler(stack_idx as usize, image_idx as usize) {
-        let mut image = image_handler.get_image();
-        if resize {
-            image =
-                image_lib::imageops::resize(&image, 100, 100, image::imageops::FilterType::Nearest);
+        let mut image: image::ImageBuffer<image::Luma<u16>, Vec<u16>> = image_handler.get_image();
+        if let Some(new_size) = resize_size {
+            image = imageops::resize(&image, new_size, new_size, imageops::FilterType::Nearest);
         }
         Response::new(image.as_bytes().to_owned())
     } else {

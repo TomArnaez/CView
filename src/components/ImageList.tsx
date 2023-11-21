@@ -9,13 +9,14 @@ import { useContextMenu } from "mantine-contextmenu";
 import { useImageStore } from "../stores/ImageStore";
 
 export const ImageList = (): JSX.Element => {
+  const thumbnailSize = 32;
+
   const [thumbnails, setThumbnails] = useState<HTMLCanvasElement[]>([]);
   const { imageStacks, currentStackIdx, setStack } = useImageStore((state) => ({
     imageStacks: state.imageStacks,
     currentStackIdx: state.currentStackIndex,
     setStack: state.setStack,
   }));
-
   const { showContextMenu } = useContextMenu();
 
   useEffect(() => {
@@ -33,15 +34,12 @@ export const ImageList = (): JSX.Element => {
       await invoke("get_image_binary", {
         imageIdx: 0,
         stackIdx,
-        resize: true,
+        resize: thumbnailSize,
       })
     );
 
     const canvas = document.createElement("canvas");
-    canvas.width = 30;
-    canvas.height = 30;
-
-    const rgba_data = convert14BArrayToRGBA(data, 30, 30);
+    const rgba_data = convert14BArrayToRGBA(data, thumbnailSize, thumbnailSize);
     const ctx = canvas.getContext("2d");
     if (ctx) {
       const imageData = ctx.createImageData(canvas.width, canvas.height);

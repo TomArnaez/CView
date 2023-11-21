@@ -16,10 +16,7 @@ import {
   FaMousePointer,
   FaLongArrowAltRight,
   FaRegFileImage,
-  FaLongArrowAltLeft,
-  FaChartBar,
   FaSave,
-  FaChartLine,
 } from "react-icons/fa";
 import { useState, useEffect, useCallback } from "react";
 import {
@@ -31,12 +28,14 @@ import {
   LiveCapture,
   AppData,
   CaptureManagerEventPayload,
+  CaptureProgress,
+  CaptureManagerStatus,
 } from "./bindings";
 import CaptureForm from "./components/CaptureForm";
 import { ImageList } from "./components/ImageList";
 import { UnlistenFn, listen } from "@tauri-apps/api/event";
 import { CaptureSettings } from "./components/CaptureSettings";
-import { convert14BArrayToRGBA, streamWorker } from "./utils";
+import { camelCaseToWords, convert14BArrayToRGBA, streamWorker } from "./utils";
 import { invoke } from "@tauri-apps/api/primitives";
 import { Mode } from "./types/draw";
 import { Viewer } from "./components/Viewer/Viewer";
@@ -76,7 +75,7 @@ function App() {
   const [streaming, setStreaming] = useState<boolean>(false);
   const [unlistenStreamEventState, setUnlistenStreamEventState] =
     useState<UnlistenFn | null>(null);
-  const [progress, setProgress] = useState<number | null>(null);
+  const [captureProgress, setCaptureProgress] = useState<CaptureProgress | null>(null);
   const [drawMode, setDrawMode] = useState<Mode>(Mode.SelectionMode);
   const [imageCanvas, setImageCanvas] = useState<HTMLCanvasElement | null>(
     null
@@ -118,7 +117,6 @@ function App() {
     window.addEventListener("keydown", handleUserKeyPress);
 
     events.lineProfileEvent.listen((e) => {
-      console.log(e);
     });
 
     listen("image-state-event", (e: any) => {
@@ -126,10 +124,11 @@ function App() {
     });
 
     events.captureProgressEvent.listen(async (e) => {
-      setProgress((e.payload.current_step * 100) / e.payload.total_steps);
+      setCaptureProgress(e.payload)
     });
 
     events.captureManagerEvent.listen(async (e) => {
+      console.log(e.payload)
       setCaptureManagerInfo(e.payload);
     });
 
@@ -153,7 +152,7 @@ function App() {
       await invoke("get_image_binary", {
         imageIdx: currentImageIdx,
         stackIdx: currentStackIdx,
-        resize: false,
+        resize: null,
       })
     );
 
@@ -258,6 +257,11 @@ function App() {
     await commands.generateDefectMap();
   };
 
+  function isCapturingStatus(status: CaptureManagerStatus): status is { Capturing: AdvancedCapture } {
+    return typeof status === 'object' && 'Capturing' in status;
+  }
+  
+
   return (
     <>
       <Modal
@@ -294,8 +298,6 @@ function App() {
         navbar={{ width: 200, breakpoint: "sm" }}
       >
         <AppShell.Navbar>
-          {progress && <Progress value={progress} color="green" />}
-
           <ImageList />
         </AppShell.Navbar>
 
@@ -375,8 +377,12 @@ function App() {
               {captureManagerInfo.status == "Available" && (
                 <> Run Advanced Capture </>
               )}
-              {captureManagerInfo.status == "Capturing" && (
-                <> Capture In Progress </>
+              {isCapturingStatus(captureManagerInfo.status) && (
+                <> Running {camelCaseToWords(captureManagerInfo.status.Capturing.type)}
+                <br/>
+                <br/> 
+                {captureProgress?.message} 
+                </>
               )}
             </Button>
           </div>

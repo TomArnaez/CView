@@ -10,14 +10,14 @@ use crate::{
         SmartCaptureData,
     },
     statistics::snr_threaded,
-    wrapper::{FullWellModesRS, SLImageRs},
+    wrapper::SLImageRs,
 };
 
 use futures::stream::{self, StreamExt};
 
 use futures_core::Stream;
 use image::{ImageBuffer, Luma};
-use log::{error, info};
+use log::{info};
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use std::{
@@ -30,7 +30,7 @@ use std::{
 };
 use tauri::{AppHandle, Runtime};
 
-#[derive(Clone, Serialize, Deserialize, Debug, Type)]
+#[derive(Clone, Serialize, Deserialize, Debug, Type, PartialEq)]
 #[serde(tag = "type", rename = "SmartCapture")]
 pub struct SmartCapture {
     pub exp_times: Vec<u32>,
@@ -39,26 +39,31 @@ pub struct SmartCapture {
     pub median_filtered: bool,
 }
 
-#[derive(Clone, Serialize, Deserialize, Debug, Type)]
+#[derive(Clone, Serialize, Deserialize, Debug, Type, PartialEq)]
 #[serde(tag = "type", rename = "SignalAccumulation")]
 pub struct SignalAccumulationCapture {
     pub exp_times: Vec<u32>,
     pub frames_per_capture: u32,
 }
 
-#[derive(Clone, Serialize, Deserialize, Debug, Type)]
+#[derive(Clone, Serialize, Deserialize, Debug, Type, PartialEq)]
 #[serde(tag = "type", rename = "MultiCapture")]
 pub struct MultiCapture {
     pub exp_times: Vec<u32>,
     pub frames_per_capture: u32,
 }
 
-#[derive(Clone, Serialize, Deserialize, Debug, Type)]
+#[derive(Clone, Serialize, Deserialize, Debug, Type, PartialEq)]
+pub struct DarkMapCapture {
+    pub exp_times: Vec<u32>,
+    pub frames_per_capture: u32
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug, Type, PartialEq)]
 #[serde(tag = "type")]
 pub struct LiveCapture {
     pub exp_time: u32,
 }
-
 
 impl AdvCapture for LiveCapture {
     fn start_stream<T: Runtime>(
@@ -158,7 +163,7 @@ impl AdvCapture for SignalAccumulationCapture {
         &self,
         app: AppHandle<T>,
         detector_controller_mutex: Arc<Mutex<DetectorController>>,
-        mut dark_maps_mutex: Arc<Mutex<HashMap<u32, SLImageRs>>>,
+        dark_maps_mutex: Arc<Mutex<HashMap<u32, SLImageRs>>>,
         defect_map_mutex: Arc<Mutex<Option<SLImageRs>>>,
         stop_signal: Arc<AtomicBool>,
     ) -> Pin<Box<dyn Stream<Item = CaptureStreamItem> + Send>> {
@@ -219,6 +224,9 @@ impl AdvCapture for SignalAccumulationCapture {
                                 .build(),
                         ))
                     })
+                    .chain(stream::once(async move {
+                        CaptureStreamItem::Progress(CaptureProgress::new(0, format!("Capturing images for exposure time {exp_time}ms").to_string()))
+                    }))
             })
             .collect::<Vec<_>>();
 
@@ -236,10 +244,12 @@ impl AdvCapture for MultiCapture {
         stop_signal: Arc<AtomicBool>,
     ) -> Pin<Box<dyn Stream<Item = CaptureStreamItem> + Send>> {
         info!("Starting Multi Capture");
+
         let streams = self
             .exp_times
             .iter()
-            .map(|&exp_time| {
+            .enumerate()
+            .map(|(index, &exp_time)| {
                 let mut detector_controller = detector_controller_mutex
                     .lock()
                     .expect("Failed to acquire detector controller lock");
@@ -274,8 +284,8 @@ impl AdvCapture for MultiCapture {
                             },
                         ))
                     })
-                    .chain(stream::once(async {
-                        CaptureStreamItem::Progress(CaptureProgress::new(0, "Completed".to_string()))
+                    .chain(stream::once(async move {
+                        CaptureStreamItem::Progress(CaptureProgress::new(0, format!("Capturing images for exposure time {exp_time}ms").to_string()))
                     }))
             })
             .collect::<Vec<_>>();

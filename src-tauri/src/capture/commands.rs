@@ -60,6 +60,7 @@ pub async fn run_capture(
             }
         },
         CaptureStreamItem::Progress(progress) => {
+            info!("got progress event");
             match CaptureProgressEvent(progress).emit_all(&app) {
                 Err(e) => error!("Failed to emit capture progress event with error {e}"),
                 _ => {}
