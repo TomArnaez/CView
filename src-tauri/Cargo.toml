@@ -18,12 +18,13 @@ bindgen = "0.65"
 miette = "5.10.0"
 
 [dependencies]
-tauri = { version = "2.0.0-alpha.17", features = ["test"] }
+tauri = { version = "2.0.0-alpha.18", features = ["test"] }
 tauri-plugin-log = { git = "https://github.com/tauri-apps/plugins-workspace", branch = "v2", features = ["colored"] }
 tauri-plugin-dialog = "2.0.0-alpha"
 tauri-plugin-window = "2.0.0-alpha"
 tauri-specta = { path = "C:/dev/repos/tauri-specta", features = ["javascript", "typescript"] }
-specta = {path = "C:/dev/repos/specta", features= ["chrono"] }
+tokio = {version = "1.34.0", features= ["macros"] }
+specta = { path = "C:/dev/repos/specta", features= ["chrono"] }
 chrono = {version="0.4.28", features = ["serde"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
@@ -35,7 +36,6 @@ cxx = "1.0"
 miette = "5.10.0"
 url = "2.4.0"
 enum_dispatch = "0.3.12"
-tokio = "1.32.0"
 typetag = "0.2.13"
 num_cpus = "1.16.0"
 regex = "1.9.5"

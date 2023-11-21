@@ -7,7 +7,6 @@ use std::{
 };
 
 use async_stream::stream;
-use async_trait::async_trait;
 use futures_core::stream::Stream;
 use futures_util::StreamExt;
 use log::{debug, error, info};

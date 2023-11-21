@@ -1,7 +1,7 @@
 use super::{
     capture::{CaptureSettingBuilder, SequenceCapture, StreamCapture},
     detector::DetectorController,
-    types::AdvCapture,
+    types::{AdvCapture, CaptureProgress, CaptureStreamItem},
 };
 
 use crate::{
@@ -9,7 +9,6 @@ use crate::{
         ExtraData, ImageHandler, ImageMetadata, ImageMetadataBuilder, SignalAccumulationData,
         SmartCaptureData,
     },
-    operations,
     statistics::snr_threaded,
     wrapper::{FullWellModesRS, SLImageRs},
 };
@@ -60,6 +59,7 @@ pub struct LiveCapture {
     pub exp_time: u32,
 }
 
+
 impl AdvCapture for LiveCapture {
     fn start_stream<T: Runtime>(
         &self,
@@ -68,7 +68,7 @@ impl AdvCapture for LiveCapture {
         dark_maps_mutex: Arc<Mutex<HashMap<u32, SLImageRs>>>,
         defect_map_mutex: Arc<Mutex<Option<SLImageRs>>>,
         stop_signal: Arc<AtomicBool>,
-    ) -> Pin<Box<dyn Stream<Item = ImageHandler> + Send>> {
+    ) -> Pin<Box<dyn Stream<Item = CaptureStreamItem> + Send>> {
         info!("Starting Live Capture");
 
         let capture_settings =
@@ -82,16 +82,16 @@ impl AdvCapture for LiveCapture {
 
         let s = stream
             .map(move |mut image| {
-                ImageHandler::new(
+                CaptureStreamItem::Image(ImageHandler::new(
                     image.to_image_buffer(),
                     ImageMetadataBuilder::new()
                         .capture_settings(capture_settings.clone())
                         .build(),
-                )
+                ))
             })
             .boxed();
 
-        s
+       s
     }
 }
 
@@ -103,8 +103,7 @@ impl AdvCapture for SmartCapture {
         dark_maps_mutex: Arc<Mutex<HashMap<u32, SLImageRs>>>,
         defect_map_mutex: Arc<Mutex<Option<SLImageRs>>>,
         stop_signal: Arc<AtomicBool>,
-    ) -> Pin<Box<dyn Stream<Item = ImageHandler> + Send>> {
-        const MAX_PIXEL_VALUE: u16 = 16383;
+    ) -> Pin<Box<dyn Stream<Item = CaptureStreamItem> + Send>> {
         info!("Starting Smart Capture");
 
         let best_snr: Arc<Mutex<Option<ImageBuffer<Luma<u16>, Vec<u16>>>>> =
@@ -145,7 +144,7 @@ impl AdvCapture for SmartCapture {
                                 foreground_rect: snr_results.2.clone(),
                             }))
                             .build();
-                        ImageHandler::new(image_buffer, image_metadata)
+                        CaptureStreamItem::Image(ImageHandler::new(image_buffer, image_metadata))
                     })
             })
             .collect::<Vec<_>>();
@@ -162,7 +161,7 @@ impl AdvCapture for SignalAccumulationCapture {
         mut dark_maps_mutex: Arc<Mutex<HashMap<u32, SLImageRs>>>,
         defect_map_mutex: Arc<Mutex<Option<SLImageRs>>>,
         stop_signal: Arc<AtomicBool>,
-    ) -> Pin<Box<dyn Stream<Item = ImageHandler> + Send>> {
+    ) -> Pin<Box<dyn Stream<Item = CaptureStreamItem> + Send>> {
         const MAX_PIXEL_VALUE: u16 = 16383;
         info!("Starting Smart Capture");
 
@@ -208,7 +207,7 @@ impl AdvCapture for SignalAccumulationCapture {
                         
                         *accumulated_exp_time.lock().unwrap() += exp_time;
 
-                        ImageHandler::new(
+                        CaptureStreamItem::Image(ImageHandler::new(
                             image_buffer,
                             ImageMetadataBuilder::new()
                                 .capture_settings(capture_settings.clone())
@@ -218,7 +217,7 @@ impl AdvCapture for SignalAccumulationCapture {
                                     },
                                 ))
                                 .build(),
-                        )
+                        ))
                     })
             })
             .collect::<Vec<_>>();
@@ -235,7 +234,7 @@ impl AdvCapture for MultiCapture {
         dark_maps_mutex: Arc<Mutex<HashMap<u32, SLImageRs>>>,
         defect_map_mutex: Arc<Mutex<Option<SLImageRs>>>,
         stop_signal: Arc<AtomicBool>,
-    ) -> Pin<Box<dyn Stream<Item = ImageHandler> + Send>> {
+    ) -> Pin<Box<dyn Stream<Item = CaptureStreamItem> + Send>> {
         info!("Starting Multi Capture");
         let streams = self
             .exp_times
@@ -266,15 +265,18 @@ impl AdvCapture for MultiCapture {
                         async move { !stop_signal_clone_inner.load(Ordering::Relaxed) }
                     })
                     .map(move |mut image| {
-                        ImageHandler::new(
+                        CaptureStreamItem::Image(ImageHandler::new(
                             image.to_image_buffer(),
                             ImageMetadata {
                                 capture_settings: Some(capture_settings.clone()),
                                 date_created: None,
                                 extra_info: None,
                             },
-                        )
+                        ))
                     })
+                    .chain(stream::once(async {
+                        CaptureStreamItem::Progress(CaptureProgress::new(0, "Completed".to_string()))
+                    }))
             })
             .collect::<Vec<_>>();
 

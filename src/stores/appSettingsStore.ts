@@ -6,6 +6,7 @@ interface AppSettings {
     saturatedPixelThreshold: number,
     updateSaturatedPixelThreshold: (newThreshold: number) => void,
     autoSaveCaptures: boolean,
+    updateAutoSaveCaptures: (newValue: boolean) => void
 }
 
 export const useAppSettingsStore = create<AppSettings>( (set) => ({
@@ -14,4 +15,5 @@ export const useAppSettingsStore = create<AppSettings>( (set) => ({
     saturatedPixelThreshold: 16000,
     updateSaturatedPixelThreshold: (newThreshold: number) => set(({saturatedPixelThreshold: newThreshold})),
     autoSaveCaptures: true,
+    updateAutoSaveCaptures: (newValue: boolean) => set({ autoSaveCaptures: newValue }),
 }));

@@ -175,10 +175,18 @@ pub struct ImageHandler {
     pub inverted_colours: bool,
 }
 
-#[derive(Clone, serde::Serialize)]
-struct Payload {
-    profile_values: Vec<u16>,
-    indices: Vec<u32>,
+impl Clone for ImageHandler {
+    fn clone(&self) -> Self {
+        // Create a new ImageHandler with the same values as self
+        ImageHandler {
+            lut: self.lut.clone(),
+            image: self.image.clone(),
+            subscribers: Vec::new(), // Provide an empty vector for subscribers
+            image_metadata: self.image_metadata.clone(),
+            roi: self.roi.clone(),
+            inverted_colours: self.inverted_colours,
+        }
+    }
 }
 
 impl ImageHandler {

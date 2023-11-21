@@ -1,4 +1,4 @@
-import { ColorInput, NumberInput } from "@mantine/core";
+import { Checkbox, ColorInput, NumberInput } from "@mantine/core";
 import { useAppSettingsStore } from "../stores/appSettingsStore";
 
 export const GeneralSettingsForm = (): JSX.Element => {
@@ -11,6 +11,7 @@ export const GeneralSettingsForm = (): JSX.Element => {
 
   return (
     <>
+      <Checkbox label="Auto-Save Captures"></Checkbox>
       <ColorInput
         label="Set colour for saturated pixels"
         defaultValue={saturatedPixelColor}

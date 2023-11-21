@@ -51,6 +51,21 @@ pub enum AdvancedCapture {
     LiveCapture,
 }
 
+
+pub enum CaptureStreamItem {
+    Image(ImageHandler),
+    Progress(CaptureProgress)
+}
+
+
+#[derive(Clone, Serialize, Type, Debug)]
+pub struct CaptureProgress {
+    message: String,
+    current_step: u32,
+    total_steps: u32,
+}
+
+
 #[enum_dispatch]
 pub trait AdvCapture {
     fn start_stream<T: Runtime>(
@@ -60,7 +75,7 @@ pub trait AdvCapture {
         dark_maps: Arc<Mutex<HashMap<u32, SLImageRs>>>,
         defect_map: Arc<Mutex<Option<SLImageRs>>>,
         stop_signal: Arc<AtomicBool>,
-    ) -> Pin<Box<dyn Stream<Item = ImageHandler> + Send>>;
+    ) -> Pin<Box<dyn Stream<Item = CaptureStreamItem> + Send>>;
 
     fn check_stop_signal(
         &self,
@@ -74,13 +89,6 @@ pub trait AdvCapture {
             false // Indicating that the capture should continue
         }
     }
-}
-
-#[derive(Clone, Serialize, Type, Debug)]
-pub struct CaptureProgress {
-    message: String,
-    current_step: u32,
-    total_steps: u32,
 }
 
 impl CaptureProgress {

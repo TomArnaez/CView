@@ -119,6 +119,7 @@ const Canvas = ({
 
   useEffect(() => {
     if (canvasImageSource != null) {
+      console.log("changing");
       setSceneWidth(canvasImageSource.width);
       setSceneHeight(canvasImageSource.height);
 
@@ -127,6 +128,7 @@ const Canvas = ({
       const minScale = Math.min(scaleX, scaleY);
       setSceneScale(minScale);
 
+      /*
       const centerX = stageWidth / 2;
       const centerY = stageHeight / 2;
 
@@ -134,6 +136,7 @@ const Canvas = ({
         x: centerX - (minScale * canvasImageSource.width) / 2,
         y: centerY - (minScale * canvasImageSource.height) / 2,
       });
+      */
     }
   }, [canvasImageSource]);
 
@@ -144,22 +147,26 @@ const Canvas = ({
     const stage = e.target.getStage();
     if (stage) {
       const oldScale = stage.scaleX();
-      const mousePointTo = {
-        x: stage.getPointerPosition().x / oldScale - stage.x() / oldScale,
-        y: stage.getPointerPosition().y / oldScale - stage.y() / oldScale,
-      };
 
       const newScale =
         e.evt.deltaY < 0 ? oldScale * scaleBy : oldScale / scaleBy;
 
-      const newX =
-        (stage.getPointerPosition().x / newScale - mousePointTo.x) * newScale;
-      const newY =
-        (stage.getPointerPosition().y / newScale - mousePointTo.y) * newScale;
 
+      const stagePointerPosition = stage.getPointerPosition();
       setZoomScale(newScale);
-      setStageX(newX);
-      setStageY(newY);
+
+      if (stagePointerPosition) {
+      const mousePointTo = {
+        x: stagePointerPosition.x / oldScale - stage.x() / oldScale,
+        y: stagePointerPosition.y / oldScale - stage.y() / oldScale,
+      };
+      const newX =
+        (stagePointerPosition.x / newScale - mousePointTo.x) * newScale;
+      const newY =
+        (stagePointerPosition.y / newScale - mousePointTo.y) * newScale;
+        setStageX(newX);
+        setStageY(newY);
+      }
     }
   };
 

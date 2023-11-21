@@ -1,7 +1,6 @@
 use std::{
-    arch::x86_64,
     collections::HashMap,
-    fmt, fs,
+    fs,
     path::PathBuf,
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -11,7 +10,7 @@ use std::{
 };
 
 use async_stream::stream;
-use futures::stream::{self, iter, Stream, StreamExt};
+use futures::stream::{self, Stream, StreamExt};
 use futures_util::pin_mut;
 use log::{error, info};
 use regex::Regex;
@@ -20,16 +19,16 @@ use tauri_specta::Event;
 
 use crate::{
     capture::corrections::run_defect_map_gen,
-    image::{ImageHandler, ImageMetadata},
-    wrapper::{self, *},
+    image::ImageHandler,
+    wrapper::*,
 };
 
 use super::{
-    capture::{Capture, CaptureError, CaptureSettingBuilder, SequenceCapture},
+    capture::{CaptureError, CaptureSettingBuilder, SequenceCapture},
     detector::{DetectorController, DetectorStatus},
     types::{
         AdvCapture, AdvancedCapture, CaptureManagerEvent, CaptureManagerEventPayload,
-        CaptureManagerInfo, CaptureManagerStatus, CaptureProgress,
+        CaptureManagerInfo, CaptureManagerStatus, CaptureStreamItem,
     },
 };
 
@@ -91,8 +90,9 @@ impl CaptureManager {
         let info = self.info.clone();
         let stop_signal_clone: Arc<AtomicBool> = self.stop_signal.clone();
 
+        info.lock().unwrap().status = CaptureManagerStatus::Capturing;
+
         tauri::async_runtime::spawn(async move {
-            info.lock().unwrap().status = CaptureManagerStatus::Capturing;
             stream::iter(exp_times)
                 .then(|exp_time| {
                     let dark_map_path: PathBuf = dark_map_path.clone();
@@ -110,7 +110,7 @@ impl CaptureManager {
                         .corrected(false)
                         .build();
 
-                        let mut average_image = SLImageRs::new_depth(1031, 1536, num_frames);
+                        let mut average_image = SLImageRs::new_depth(1536, 1031, num_frames);
 
                         let mut enumerated_stream = detector_controller
                             .lock()
@@ -165,6 +165,7 @@ impl CaptureManager {
         let info = self.info.clone();
 
         let stop_signal_clone: Arc<AtomicBool> = self.stop_signal.clone();
+        info.lock().unwrap().status = CaptureManagerStatus::Capturing;
 
         tauri::async_runtime::spawn(async move {
             info.lock().unwrap().status = CaptureManagerStatus::Capturing;
@@ -324,7 +325,7 @@ impl CaptureManager {
         &mut self,
         app: AppHandle<T>,
         capture: AdvancedCapture,
-    ) -> Result<impl Stream<Item = ImageHandler>, CaptureError> {
+    ) -> Result<impl Stream<Item = CaptureStreamItem>, CaptureError> {
         if self.info.lock().unwrap().status != CaptureManagerStatus::Available {
             return Err(CaptureError::DetectorDisconnected);
         }

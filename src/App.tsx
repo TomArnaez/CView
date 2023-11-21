@@ -226,7 +226,7 @@ function App() {
     // TODO: Find a bettr way to clear stream event
     await delay(500);
     setImageCanvas(null);
-    setStreaming(true);
+    setStreaming(false);
   };
 
   const handleAdvancedCapture = async () => {

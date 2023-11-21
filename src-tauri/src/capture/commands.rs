@@ -1,4 +1,5 @@
-use crate::capture::corrections::run_defect_map_gen;
+use crate::capture::types::CaptureProgressEvent;
+use crate::capture::types::CaptureStreamItem;
 use crate::events::StreamCaptureEvent;
 use crate::image::ImageHandler;
 use crate::image::ImageStack;
@@ -8,11 +9,9 @@ use chrono::Utc;
 use futures_util::{pin_mut, StreamExt};
 use log::error;
 use log::info;
-use std::path::PathBuf;
 use std::sync::Mutex;
 use tauri::ipc::Response;
 use tauri::AppHandle;
-use tauri::Manager;
 use tauri::State;
 use tauri_specta::Event;
 
@@ -41,27 +40,35 @@ pub async fn run_capture(
 
     let mut image_handlers: Vec<ImageHandler> = Vec::new();
 
-    while let Some(image_handler) = stream.next().await {
-        let image_handler_clone = ImageHandler::new(
-            image_handler.image.clone(),
-            image_handler.image_metadata.clone(),
-        );
+    while let Some(stream_item) = stream.next().await {
+        match stream_item {
+        CaptureStreamItem::Image(mut image_handler) => {
+            image_handler.apply_histogram_equilization();
 
-        if save_capture {
-            println!("adding capture to vec");
-            image_handlers.push(image_handler_clone);
-        }
-
-        let stream_buffer = stream_buffer_mutex.lock().unwrap();
-        match stream_buffer.q.push(image_handler) {
-            Err(e) => error!("Failed to push to stream buffer with e {e}"),
-            _ => {}
-        }
-        StreamCaptureEvent().emit_all(&app).unwrap();
+            if save_capture {
+                image_handlers.push(image_handler.clone());
+            }
+    
+            let stream_buffer = stream_buffer_mutex.lock().unwrap();
+            match stream_buffer.q.push(image_handler) {
+                Err(e) => error!("Failed to push to stream buffer with e {e}"),
+                _ => {}
+            }
+            match StreamCaptureEvent().emit_all(&app) {
+                Err(e) => error!("Failed to stream capture event event with error {e}"),
+                _ => {}
+            }
+        },
+        CaptureStreamItem::Progress(progress) => {
+            match CaptureProgressEvent(progress).emit_all(&app) {
+                Err(e) => error!("Failed to emit capture progress event with error {e}"),
+                _ => {}
+                }
+            },
+        } 
     }
 
     if save_capture {
-        println!("adding to save capture");
         image_service_mutex
             .lock()
             .unwrap()

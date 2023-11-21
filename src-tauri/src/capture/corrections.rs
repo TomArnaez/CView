@@ -1,15 +1,13 @@
-use log::{error, info};
+use log::error;
 use serde::Serialize;
 use specta::Type;
+use std::os::windows::process::CommandExt;
 use std::path::PathBuf;
-use std::sync::Mutex;
-use tauri::path::BaseDirectory;
-use tauri::{AppHandle, Manager, Runtime};
 use thiserror::Error;
-
 use crate::wrapper::InternalSLError;
-use crate::wrapper::SLImageRs;
 use std::process::Command;
+
+const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 #[derive(Error, Debug, Type, Serialize)]
 pub enum CorrectionError {
@@ -22,13 +20,23 @@ pub enum CorrectionError {
 
 pub fn run_defect_map_gen(images_dir: &PathBuf, exe_dir: &PathBuf) -> Result<PathBuf, ()> {
     let args = [images_dir.to_str().unwrap(), "1", "0", "-f", "-a", "-p"];
-    let mut cmd = Command::new(exe_dir);
-    let cmd = cmd.args(args);
+    let output = Command::new(exe_dir).args(args).creation_flags(CREATE_NO_WINDOW).spawn();
 
-    if (cmd.spawn().unwrap().wait().is_ok()) {
-        return Ok(images_dir.join("GlobalDefectMap.tif"));
+    match output {
+        Ok(mut child) => {
+            let status = child.wait().expect("Failed to wait for the process");
+            if status.success() {
+                Ok(images_dir.join("GlobalDefectMap.tif"))
+            } else {
+                error!("Process failed with exit code: {}", status);
+                Err(())
+            }
+        }
+        Err(e) => {
+            error!("Error running run defect map gen command: {e}");
+            Err(())
+        }
     }
-    Err(())
 }
 
 #[cfg(test)]
