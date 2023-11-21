@@ -6,7 +6,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { LineProfileData } from "../../types/charts";
+import { LineProfileData } from "../../bindings";
 
 const renderLineProfileChart = (data: LineProfileData[]) => (
   <LineChart margin={{ top: 5, right: 30, left: 20, bottom: 5 }} data={data}>
@@ -14,7 +14,12 @@ const renderLineProfileChart = (data: LineProfileData[]) => (
     <XAxis dataKey="idx" />
     <YAxis />
     <Tooltip />
-    <Line type="monotone" dataKey="value" stroke="#8884d8" />
+    <Line
+      type="monotone"
+      dataKey="value"
+      stroke="#8884d8"
+      animationDuration={300}
+    />
   </LineChart>
 );
 

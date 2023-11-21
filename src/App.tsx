@@ -68,14 +68,16 @@ function App() {
     updateStacks: state.updateStacks,
   }));
 
-  const [captureManagerInfo, setCaptureManagerInfo] = useState<CaptureManagerEventPayload>({
-    status: "DetectorDisconnected",
-    dark_maps: [],
-  });
+  const [captureManagerInfo, setCaptureManagerInfo] =
+    useState<CaptureManagerEventPayload>({
+      status: "DetectorDisconnected",
+      dark_maps: [],
+    });
   const [streaming, setStreaming] = useState<boolean>(false);
-  const [unlistenStreamEventState, setUnlistenStreamEventState] = useState<UnlistenFn | null>(null);
+  const [unlistenStreamEventState, setUnlistenStreamEventState] =
+    useState<UnlistenFn | null>(null);
   const [progress, setProgress] = useState<number | null>(null);
-  const [drawMode, setDrawMode] = useState<Mode>(Mode.SelectionMode)
+  const [drawMode, setDrawMode] = useState<Mode>(Mode.SelectionMode);
   const [imageCanvas, setImageCanvas] = useState<HTMLCanvasElement | null>(
     null
   );
@@ -115,34 +117,36 @@ function App() {
   useEffect(() => {
     window.addEventListener("keydown", handleUserKeyPress);
 
+    events.lineProfileEvent.listen((e) => {
+      console.log(e);
+    });
+
     listen("image-state-event", (e: any) => {
       updateStacks(e.payload);
     });
 
     events.captureProgressEvent.listen(async (e) => {
-      console.log(e.payload);
-      setProgress(e.payload.current_step * 100 / e.payload.total_steps)
-    })
+      setProgress((e.payload.current_step * 100) / e.payload.total_steps);
+    });
 
     events.captureManagerEvent.listen(async (e) => {
-      console.log(e.payload)
       setCaptureManagerInfo(e.payload);
-    })
+    });
 
     return () => {
       window.removeEventListener("keydown", handleUserKeyPress);
     };
   }, []);
 
+  const refreshImage = async (): Promise<void> => {
+    await refreshCanvas(
+      convert14BArrayToRGBA(await fetchImageData(), 1031, 1536)
+    );
+  };
+
   useEffect(() => {
-    async function asyncFunc() {
-      const data = convert14BArrayToRGBA(await fetchImageData(), 1031, 1536);
-      if (data != null) {
-        refreshImage(data);
-      }
-    }
-    if (imageStacks.length > 0) asyncFunc();
-  }, [currentImageIdx, currentStackIdx]);
+    if (imageStacks.length > 0) refreshImage();
+  }, [currentImageIdx, currentStackIdx, imageStacks]);
 
   const fetchImageData = async (): Promise<Uint16Array> => {
     const data = new Uint16Array(
@@ -156,7 +160,7 @@ function App() {
     return data;
   };
 
-  const refreshImage = async (data: Uint8Array) => {
+  const refreshCanvas = async (data: Uint8Array) => {
     if (data == null) return;
 
     const width = 1031;
@@ -185,69 +189,59 @@ function App() {
 
   const listenStreamEvent = async (): Promise<UnlistenFn> => {
     return events.streamCaptureEvent.listen(async () => {
-
-      const data = new Uint16Array(await invoke("read_stream_buffer", {
-      }));
+      const data = new Uint16Array(await invoke("read_stream_buffer", {}));
       if (data.length != 0) {
         const width = 1031;
         const height = 1536;
-        refreshImage(convert14BArrayToRGBA(data, width, height));
-      }
-
-      /*
-      console.log("data");
-      if (data != null) {
-        console.log("got data", data);
-        refreshImage(data);
+        refreshCanvas(convert14BArrayToRGBA(data, width, height));
       }
     });
-    */
-  });
   };
 
   const handleCapture = async (capture: AdvancedCapture) => {
     setCaptureSettingsModalOpened(false);
-    await commands.runCapture(capture);
+    await commands.runCapture(capture, true);
   };
 
   const handleGoLive = async () => {
     let unlisten = await listenStreamEvent();
-    setUnlistenStreamEventState(await listenStreamEvent())
+    setUnlistenStreamEventState(await listenStreamEvent());
     setStreaming(true);
     const capture: LiveCapture = {
       exp_time: 100,
       type: "LiveCapture",
     };
-    await commands.runCapture(capture);
+    await commands.runCapture(capture, false);
   };
 
   const handleStopLive = async () => {
-    console.log("streaming", streaming)
     await commands.stopCapture();
-
     if (unlistenStreamEventState != null) {
       setUnlistenStreamEventState(null);
     }
+    function delay(ms) {
+      return new Promise((resolve) => setTimeout(resolve, ms));
+    }
 
+    // TODO: Find a bettr way to clear stream event
+    await delay(500);
     setImageCanvas(null);
-    setStreaming(false);
-    setStack(0);
-    console.log("Stopped streaming", streaming)
-
-    console.log("no mo streaming");
+    setStreaming(true);
   };
 
   const handleAdvancedCapture = async () => {
-    if (captureManagerInfo.status == "NeedsDefectMaps") {
-      await commands.generateDefectMap()
+    if (captureManagerInfo.status == "DarkMapsRequired") {
+      commands.generateDarkMaps();
+    } else if (captureManagerInfo.status == "DefectMapsRequired") {
+      commands.generateDefectMap();
     } else if (captureManagerInfo.status == "Available") {
       setCaptureSettingsModalOpened(true);
     }
   };
 
-
   const handleChangeStack = async (index: number) => {
     setStack(index);
+    console.log("changing stack");
   };
 
   const handleOpenImages = async () => {
@@ -256,31 +250,10 @@ function App() {
     refreshImage(await fetchImageData());
   };
 
-  const handleRotate = async (rotateLeft: boolean) => {
-    await commands.rotate(currentImageIdx, currentStackIdx, rotateLeft);
-    refreshImage(await fetchImageData());
-  };
-
-  const handleHistogramEquilization = async () => {
-    await commands.histogramEquilization(currentImageIdx, currentStackIdx);
-    refreshImage(await fetchImageData());
-  };
-
-  const handleInvertColours = async () => {
-    await commands.invertColours(currentImageIdx, currentStackIdx);
-    refreshImage(await fetchImageData());
-  };
-
-  const handleFlip = async (vertically: boolean) => {
-    await commands.flip(currentImageIdx, currentStackIdx, vertically);
-    refreshImage(await fetchImageData());
-  };
-
   const handleGenerateDarkMaps = async () => {
     await commands.generateDarkMaps();
   };
 
-  
   const handleGenerationDefectMap = async () => {
     await commands.generateDefectMap();
   };
@@ -321,7 +294,7 @@ function App() {
         navbar={{ width: 200, breakpoint: "sm" }}
       >
         <AppShell.Navbar>
-        {progress && <Progress value={progress} color="green"/>}
+          {progress && <Progress value={progress} color="green" />}
 
           <ImageList />
         </AppShell.Navbar>
@@ -389,14 +362,22 @@ function App() {
               }}
               variant="filled"
               fullWidth
-              color={(captureManagerInfo.status == "Available" || captureManagerInfo.status == "NeedsDefectMaps") ? "blue" : "red"}
+              color={captureManagerInfo.status == "Available" ? "blue" : "red"}
               disabled={captureManagerInfo.status == "DetectorDisconnected"}
               onClick={handleAdvancedCapture}
             >
-              {captureManagerInfo.status == "NeedsDefectMaps" && <> Defect Map Generation </>}
-              {captureManagerInfo.status == "Available" && <> Run Advanced Capture </>}
-              {captureManagerInfo.status == "Capturing" && <> Capture In Progress </>}
-
+              {captureManagerInfo.status == "DarkMapsRequired" && (
+                <> Generate Dark Maps </>
+              )}
+              {captureManagerInfo.status == "DefectMapsRequired" && (
+                <> Generate Defect Map </>
+              )}
+              {captureManagerInfo.status == "Available" && (
+                <> Run Advanced Capture </>
+              )}
+              {captureManagerInfo.status == "Capturing" && (
+                <> Capture In Progress </>
+              )}
             </Button>
           </div>
 
@@ -442,10 +423,13 @@ function App() {
               style={{
                 height: "100%",
               }}
-          
               variant="filled"
               color={live ? "red" : "blue"}
-              disabled={captureManagerInfo.status == "DetectorDisconnected" || captureManagerInfo.status == "NeedsDefectMaps"}
+              disabled={
+                captureManagerInfo.status == "DetectorDisconnected" ||
+                captureManagerInfo.status == "DarkMapsRequired" ||
+                captureManagerInfo.status == "DefectMapsRequired"
+              }
               onClick={() => {
                 live ? handleStopLive() : handleGoLive();
                 setLive(!live);
@@ -471,7 +455,12 @@ function App() {
             wrap="nowrap"
           >
             {imageCanvas && (
-              <Viewer drawMode={drawMode} imageCanvas={imageCanvas} interaction={!streaming} />
+              <Viewer
+                drawMode={drawMode}
+                refreshImage={refreshImage}
+                imageCanvas={imageCanvas}
+                interaction={!streaming}
+              />
             )}
           </Flex>
         </AppShell.Main>

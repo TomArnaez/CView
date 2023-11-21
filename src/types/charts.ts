@@ -6,9 +6,3 @@ export type HistogramBin = {
     bin: number;
     count: number;
 }
-
-export type LineProfileData = {
-    idx: number;
-    value: number;
-}
-

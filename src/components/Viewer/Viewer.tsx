@@ -8,10 +8,16 @@ import { useImageStore } from "../../stores/ImageStore";
 type ViewerProps = {
   imageCanvas: HTMLCanvasElement;
   drawMode: Mode;
-  interaction: bool
+  interaction: boolean;
+  refreshImage: () => Promise<void>;
 };
 
-export const Viewer = ({ imageCanvas, drawMode, interaction }: ViewerProps): JSX.Element => {
+export const Viewer = ({
+  imageCanvas,
+  drawMode,
+  interaction,
+  refreshImage,
+}: ViewerProps): JSX.Element => {
   const [mousePos, setMousePos] = useState<Point>({ x: 0, y: 0 });
   const [pixelValue, setPixelValue] = useState<number>(0);
   const { currentImageIdx, currentStackIdx, getImageMetadata } = useImageStore(
@@ -38,12 +44,14 @@ export const Viewer = ({ imageCanvas, drawMode, interaction }: ViewerProps): JSX
   const handleHistogramEquilization = async () => {
     if (currentImageIdx != null && currentStackIdx != null) {
       await commands.histogramEquilization(currentImageIdx, currentStackIdx);
+      refreshImage();
     }
   };
 
   const handleInvertColours = async () => {
     if (currentImageIdx != null && currentStackIdx != null) {
       await commands.invertColours(currentImageIdx, currentStackIdx);
+      refreshImage();
     }
   };
 
@@ -73,12 +81,14 @@ export const Viewer = ({ imageCanvas, drawMode, interaction }: ViewerProps): JSX
         onInvertColours={handleInvertColours}
         onFlip={handleFlip}
       />
-      {interaction && <CanvasOverlay
-        pos={mousePos}
-        adu={pixelValue}
-        imageIdx={currentImageIdx}
-        metadata={getImageMetadata(currentImageIdx, currentStackIdx)}
-      />}
+      {interaction && (
+        <CanvasOverlay
+          pos={mousePos}
+          adu={pixelValue}
+          imageIdx={currentImageIdx}
+          metadata={getImageMetadata(currentImageIdx, currentStackIdx)}
+        />
+      )}
     </div>
   );
 };

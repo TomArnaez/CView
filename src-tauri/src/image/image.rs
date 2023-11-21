@@ -23,7 +23,14 @@ use tauri::{AppHandle, Manager};
 use tiff::encoder::{colortype, TiffEncoder};
 
 const RANGE_SIZE: usize = 16384;
-pub type LineProfile = Vec<(u16, u32)>;
+
+#[derive(Serialize, Type, Clone, Debug)]
+pub struct LineProfileData {
+    idx: u32,
+    value: u32,
+}
+
+pub type LineProfile = Vec<LineProfileData>;
 
 #[derive(Serialize, Type)]
 pub struct ImageService {
@@ -288,7 +295,6 @@ impl ImageHandler {
 
                 *p = lut_val as u16;
             });
-
         };
 
         if self.inverted_colours {
@@ -365,10 +371,7 @@ pub struct ImageIterator<'a> {
 }
 
 impl<'a> ImageIterator<'a> {
-    pub fn new(
-        image: &'a ImageBuffer<Luma<u16>, Vec<u16>>,
-        roi: Annotation,
-    ) -> Self {
+    pub fn new(image: &'a ImageBuffer<Luma<u16>, Vec<u16>>, roi: Annotation) -> Self {
         Self {
             image,
             roi,
@@ -473,8 +476,7 @@ impl DataExtractor for Rect {
     }
 
     fn get_profile(&self, img: &ImageBuffer<Luma<u16>, Vec<u16>>) -> LineProfile {
-        let mut profile: Vec<u16> = Vec::with_capacity((self.width) as usize);
-        let indices: Vec<u32> = (self.pos.x..self.pos.x + self.width).collect();
+        let mut line_profile = LineProfile::new();
 
         if self.height == 0 || self.width == 0 {
             return Vec::new();
@@ -487,10 +489,13 @@ impl DataExtractor for Rect {
             }
 
             let column_average = column_sum / self.height;
-            profile.push(column_average as u16)
+            line_profile.push(LineProfileData {
+                idx: x,
+                value: column_average,
+            });
         }
 
-        profile.into_iter().zip(indices.into_iter()).collect()
+        line_profile
     }
 }
 
@@ -563,9 +568,6 @@ impl DataExtractor for Line {
 
     fn get_profile(&self, img: &ImageBuffer<Luma<u16>, Vec<u16>>) -> LineProfile {
         // TODO: Handle minus cases properly
-        let mut profile: Vec<u16> =
-            Vec::with_capacity((self.finish.x.saturating_sub(self.start.x)) as usize);
-        let mut indices: Vec<u32> = Vec::new();
 
         let points = crate::statistics::get_points_along_line(
             self.start.x as isize,
@@ -573,6 +575,8 @@ impl DataExtractor for Line {
             self.finish.x as isize,
             self.finish.y as isize,
         );
+
+        let mut line_profile = LineProfile::new();
 
         // Build the profile data by averaging each column
         let mut prev_point = points.get(0).unwrap();
@@ -584,18 +588,22 @@ impl DataExtractor for Line {
                 column_sum += intensity as u64;
                 column_count += 1;
             } else {
-                profile.push((column_sum / column_count as u64) as u16);
-                indices.push(prev_point.0 as u32);
+                line_profile.push(LineProfileData {
+                    idx: prev_point.0 as u32,
+                    value: (column_sum as u32 / column_count as u32) as u32,
+                });
                 prev_point = point;
                 column_sum = intensity as u64;
                 column_count = 1;
             }
         }
 
-        profile.push((column_sum / column_count as u64) as u16);
-        indices.push(prev_point.0 as u32);
+        line_profile.push(LineProfileData {
+            idx: prev_point.0 as u32,
+            value: (column_sum as u32 / column_count as u32) as u32,
+        });
 
-        profile.into_iter().zip(indices.into_iter()).collect()
+        line_profile
     }
 }
 

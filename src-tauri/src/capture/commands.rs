@@ -6,12 +6,13 @@ use crate::ImageService;
 use crate::StreamBuffer;
 use chrono::Utc;
 use futures_util::{pin_mut, StreamExt};
+use log::error;
 use log::info;
-use tauri::Manager;
 use std::path::PathBuf;
 use std::sync::Mutex;
 use tauri::ipc::Response;
 use tauri::AppHandle;
+use tauri::Manager;
 use tauri::State;
 use tauri_specta::Event;
 
@@ -27,6 +28,7 @@ pub async fn run_capture(
     stream_buffer_mutex: State<'_, Mutex<StreamBuffer>>,
     capture_manager_mutex: State<'_, Mutex<CaptureManager>>,
     capture: AdvancedCapture,
+    save_capture: bool,
 ) -> Result<(), CaptureError> {
     info!("Called Run Capture with {:?}", capture);
 
@@ -44,21 +46,31 @@ pub async fn run_capture(
             image_handler.image.clone(),
             image_handler.image_metadata.clone(),
         );
-        image_handlers.push(image_handler_clone);
+
+        if save_capture {
+            println!("adding capture to vec");
+            image_handlers.push(image_handler_clone);
+        }
 
         let stream_buffer = stream_buffer_mutex.lock().unwrap();
-        stream_buffer.q.push(image_handler);
+        match stream_buffer.q.push(image_handler) {
+            Err(e) => error!("Failed to push to stream buffer with e {e}"),
+            _ => {}
+        }
         StreamCaptureEvent().emit_all(&app).unwrap();
     }
 
-    image_service_mutex
-        .lock()
-        .unwrap()
-        .add_image_stack(ImageStack {
-            timestamp: Some(Utc::now()),
-            image_handlers,
-            capture: Some(capture),
-        });
+    if save_capture {
+        println!("adding to save capture");
+        image_service_mutex
+            .lock()
+            .unwrap()
+            .add_image_stack(ImageStack {
+                timestamp: Some(Utc::now()),
+                image_handlers,
+                capture: Some(capture),
+            });
+    }
 
     Ok(())
 }
@@ -85,9 +97,15 @@ pub fn read_stream_buffer(stream_buffer_mutex: State<Mutex<StreamBuffer>>) -> Re
 
 #[tauri::command(async)]
 #[specta::specta]
-pub async fn generate_defect_map(app: AppHandle, capture_manager_mutex: State<'_, Mutex<CaptureManager>>) -> Result<(), ()> {
+pub async fn generate_defect_map(
+    app: AppHandle,
+    capture_manager_mutex: State<'_, Mutex<CaptureManager>>,
+) -> Result<(), ()> {
     info!("Generating Defect Maps");
-    capture_manager_mutex.lock().unwrap().generate_defect_map(app.clone(), vec![100, 200, 300], 10);
+    capture_manager_mutex
+        .lock()
+        .unwrap()
+        .generate_defect_map(app.clone(), vec![100, 200, 300], 10);
     Ok(())
 }
 
@@ -98,6 +116,9 @@ pub async fn generate_dark_maps(
     capture_manager_mutex: State<'_, Mutex<CaptureManager>>,
 ) -> Result<(), CaptureError> {
     info!("Generating Dark Maps");
-    capture_manager_mutex.lock().unwrap().generate_dark_maps(vec![100, 200, 300], 10);
+    capture_manager_mutex
+        .lock()
+        .unwrap()
+        .generate_dark_maps(vec![100, 200, 300], 10);
     Ok(())
 }

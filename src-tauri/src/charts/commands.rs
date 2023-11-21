@@ -25,6 +25,7 @@ pub fn subscribe_chart(
         if let Some(image_handler) =
             image_service.get_mut_handler(stack_idx as usize, image_idx as usize)
         {
+            println!("{}", window.label());
             match chart_type {
                 Chart::Histogram => {
                     image_handler.subscribe(Box::new(HistogramSubscriber { app, window }));

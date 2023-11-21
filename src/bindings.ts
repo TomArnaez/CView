@@ -9,9 +9,9 @@ try {
     else return { status: "error", error: e  as any };
 }
 },
-async runCapture(capture: AdvancedCapture) : Promise<__Result__<null, "DetectorDisconnected" | "DetectorInUse" | { File2Error: CorrectionError } | { SLError: InternalSLError } | "Unknown">> {
+async runCapture(capture: AdvancedCapture, saveCapture: boolean) : Promise<__Result__<null, "DetectorDisconnected" | "DetectorInUse" | { File2Error: CorrectionError } | { SLError: InternalSLError } | "Unknown">> {
 try {
-    return { status: "ok", data: await TAURI_INVOKE("plugin:tauri-specta|run_capture", { capture }) };
+    return { status: "ok", data: await TAURI_INVOKE("plugin:tauri-specta|run_capture", { capture, saveCapture }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -88,7 +88,7 @@ export type BinningModesRS = RemoteBinningModes
 export type CancelCaptureEvent = []
 export type CaptureManagerEvent = CaptureManagerEventPayload
 export type CaptureManagerEventPayload = { dark_maps: number[]; status: CaptureManagerStatus }
-export type CaptureManagerStatus = "Available" | "Capturing" | "NeedsDefectMaps" | "DetectorDisconnected"
+export type CaptureManagerStatus = "Available" | "Capturing" | "DarkMapsRequired" | "DefectMapsRequired" | "DetectorDisconnected"
 export type CaptureProgress = { message: string; current_step: number; total_steps: number }
 export type CaptureProgressEvent = CaptureProgress
 export type CaptureSetting = { exp_time: number; dds: boolean; full_well: FullWellModesRS; binning_mode: BinningModesRS; roi: number[] | null; corrected: boolean }
@@ -105,7 +105,8 @@ export type ImageStack = { timestamp: string | null; image_handlers: ImageHandle
 export type ImageStateEvent = ImageService
 export type InternalSLError = string
 export type Line = { start: Point; finish: Point }
-export type LineProfileEvent = ([number, number])[]
+export type LineProfileData = { idx: number; value: number }
+export type LineProfileEvent = LineProfileData[]
 export type LiveCapture = { exp_time: number; type: "LiveCapture" }
 export type MultiCapture = { exp_times: number[]; frames_per_capture: number; type: "MultiCapture" }
 export type Point = { x: number; y: number }
@@ -122,7 +123,7 @@ export type StreamCaptureEvent = []
 
          import { invoke as TAURI_INVOKE } from "@tauri-apps/api/primitives";
 import * as TAURI_API_EVENT from "@tauri-apps/api/event";
-import { type Window as __WebviewWindowHandle__ } from "@tauri-apps/api/window";
+import { type Window as __Window__ } from "@tauri-apps/api/window";
 
 type __EventObj__<T> = {
   listen: (
@@ -146,7 +147,7 @@ function __makeEvents__<T extends Record<string, any>>(
   return new Proxy(
     {} as unknown as {
       [K in keyof T]: __EventObj__<T[K]> & {
-        (handle: __WebviewWindowHandle__): __EventObj__<T[K]>;
+        (handle: __Window__): __EventObj__<T[K]>;
       };
     },
     {

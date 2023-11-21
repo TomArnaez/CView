@@ -8,7 +8,7 @@ use tauri::{AppHandle, Manager, Runtime};
 use thiserror::Error;
 
 use crate::wrapper::InternalSLError;
-use crate::{wrapper::SLImageRs};
+use crate::wrapper::SLImageRs;
 use std::process::Command;
 
 #[derive(Error, Debug, Type, Serialize)]
@@ -20,25 +20,16 @@ pub enum CorrectionError {
     FileNotFound(String),
 }
 
-pub fn run_defect_map_gen(images_dir: &PathBuf, exe_dir: &PathBuf) -> Result<(), CorrectionError> {
-    info!("Running defect map gen exe");
-    let args = [
-        images_dir.to_str().unwrap(),
-        "1",
-        "0",
-        "-f",
-        "-a",
-        "-p",
-    ];
+pub fn run_defect_map_gen(images_dir: &PathBuf, exe_dir: &PathBuf) -> Result<PathBuf, ()> {
+    let args = [images_dir.to_str().unwrap(), "1", "0", "-f", "-a", "-p"];
     let mut cmd = Command::new(exe_dir);
-    let cmd = cmd
-        .args(args);
+    let cmd = cmd.args(args);
 
-    let child =  cmd.spawn().unwrap();
-    info!("Defect Gen Completed");
-    Ok(())
+    if (cmd.spawn().unwrap().wait().is_ok()) {
+        return Ok(images_dir.join("GlobalDefectMap.tif"));
+    }
+    Err(())
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -54,7 +45,9 @@ mod tests {
     pub fn defect_map_gen() {
         let app = create_app(tauri::test::mock_builder());
         let images_dir = app.path().app_local_data_dir().unwrap().join("DefectMap");
-        let exe_dir = PathBuf::from("C:\\dev\\repos\\CView\\src-tauri\\target\\debug\\resources\\DefectMapGeneration");
+        let exe_dir = PathBuf::from(
+            "C:\\dev\\repos\\CView\\src-tauri\\target\\debug\\resources\\DefectMapGeneration",
+        );
         let log_dir = app.path().app_log_dir().unwrap();
         println!("{}", log_dir.display());
         if (exe_dir.exists()) {

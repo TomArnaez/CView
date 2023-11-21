@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 use tauri_specta::Event;
 
-use crate::{image::LineProfile, events::Histogram};
+use crate::{events::Histogram, image::LineProfile};
 
 #[derive(Serialize, Deserialize, Type)]
 pub enum Chart {

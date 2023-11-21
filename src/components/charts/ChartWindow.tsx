@@ -3,15 +3,18 @@ import GenericChart from "./GenericChart";
 import { events } from "../../bindings";
 import ReactDOM from "react-dom/client";
 import renderLineProfileChart from "./LineProfileChart";
+import { Window } from "@tauri-apps/api/window";
 
 console.log("Hello");
 const ChartWindow = () => {
   const [chartData, setChartData] = useState([]);
 
   useEffect(() => {
-    console.log("Chart Window setup");
+    console.log("Chart Window setup for window", Window.getCurrent().label);
     events.lineProfileEvent.listen((e) => {
-      console.log(e.payload);
+      if (Window.getCurrent().label === e.windowLabel) {
+        setChartData(e.payload);
+      }
     });
   }, []);
 

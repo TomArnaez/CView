@@ -4,7 +4,8 @@ use tauri::{AppHandle, Window};
 use tauri_specta::Event;
 
 use crate::{
-    image::{types::DataExtractor, Annotation, LineProfile}, charts::types::LineProfileEvent,
+    charts::types::LineProfileEvent,
+    image::{types::DataExtractor, Annotation, LineProfile},
 };
 
 pub trait ChartSubscriber {
@@ -23,7 +24,6 @@ pub struct HistogramSubscriber {
 
 impl ChartSubscriber for LineProfileSubscriber {
     fn update(&self, image: &ImageBuffer<Luma<u16>, Vec<u16>>, roi: Option<Annotation>) {
-        info!("updating!");
         if let Some(roi) = roi {
             let line_profile_data: LineProfile = roi.get_profile(&image);
 

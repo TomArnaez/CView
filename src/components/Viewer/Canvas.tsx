@@ -6,19 +6,11 @@ import {
   Group,
   Rect as KonvaRect,
   Line as KonvaLine,
-  Circle,
 } from "react-konva";
-import {
-  FaArrowRight,
-  FaArrowLeft,
-  FaChartBar,
-  FaArrowUp,
-  FaArrowDown,
-} from "react-icons/fa";
+import { FaChartBar } from "react-icons/fa";
 import Konva from "konva";
 import { KonvaEventObject } from "konva/lib/Node";
 import { Annotation, Point, Rect } from "../../bindings";
-import { Window } from "@tauri-apps/api/window";
 import { Mode } from "../../types/draw";
 import { useContextMenu } from "mantine-contextmenu";
 import classes from "../../css/master.module.css";
@@ -43,9 +35,7 @@ const Canvas = ({
   onCursorMove,
   onRoiChange,
   onHistogramEquilization,
-  onRotate,
   onInvertColours,
-  onFlip,
 }: CanvasProps): JSX.Element => {
   const stageParentRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef(null);
@@ -67,20 +57,12 @@ const Canvas = ({
       switch (event.key) {
         case "k": {
           if (newAnnotation != null) {
-           createChartWindow(
-              "LineProfile",
-              imageIdx,
-              0
-            );
+            createChartWindow("LineProfile", imageIdx, 0);
           }
           break;
         }
         case "h": {
-          createChartWindow(
-            "Histogram",
-            imageIdx,
-            0
-          );
+          createChartWindow("Histogram", imageIdx, 0);
           break;
         }
         case "a": {
@@ -306,34 +288,6 @@ const Canvas = ({
       ref={stageParentRef}
       className={classes.stageParentDiv}
       onContextMenu={showContextMenu([
-        {
-          key: "Rotate Left",
-          title: "Rotate Left",
-          icon: <FaArrowLeft size={16} />,
-          onClick: () => {
-            onRotate(true);
-          },
-        },
-        {
-          key: "Rotate Right",
-          title: "Rotate Right",
-          icon: <FaArrowRight size={16} />,
-          onClick: () => {
-            onRotate(false);
-          },
-        },
-        {
-          key: "Flip Vertically",
-          title: "Flip Vertically",
-          icon: <FaArrowUp size={16} />,
-          onClick: () => onFlip(true),
-        },
-        {
-          key: "Flip Horizontally",
-          title: "Flip Horizontally",
-          icon: <FaArrowDown size={16} />,
-          onClick: () => onFlip(false),
-        },
         {
           key: "Invert Colours",
           title: "Invert Colours",
