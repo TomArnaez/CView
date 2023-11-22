@@ -1,9 +1,9 @@
 use super::types::{Annotation, DataExtractor, Line, Rect};
-use super::{ExtraData, ImageMetadata};
+use super::{CaptureResultData, ImageMetadata, get_points_along_line, calculate_mean_and_std_iter};
 use crate::capture::capture::CaptureSetting;
 use crate::capture::types::AdvancedCapture;
 use crate::charts::charts::ChartSubscriber;
-use crate::operations::HistogramEquilisation;
+use crate::image::HistogramEquilisation;
 use crate::utils::serialize_dt;
 use chrono::prelude::{DateTime, Utc};
 use image::ImageEncoder;
@@ -145,7 +145,6 @@ impl ImageStack {
         let mut img_file = Cursor::new(Vec::new());
 
         {
-            // first create a multipage image with 2 images
             let mut img_encoder = TiffEncoder::new(&mut img_file).unwrap();
 
             for image_handler in &self.image_handlers {
@@ -165,7 +164,7 @@ impl ImageStack {
 #[derive(Serialize, Type)]
 pub struct ImageHandler {
     #[serde(skip)]
-    pub lut: Option<Vec<u16>>,
+    pub lut: Option<Vec<u32>>,
     #[serde(skip)]
     pub image: ImageBuffer<Luma<u16>, Vec<u16>>,
     #[serde(skip)]
@@ -177,11 +176,10 @@ pub struct ImageHandler {
 
 impl Clone for ImageHandler {
     fn clone(&self) -> Self {
-        // Create a new ImageHandler with the same values as self
         ImageHandler {
             lut: self.lut.clone(),
             image: self.image.clone(),
-            subscribers: Vec::new(), // Provide an empty vector for subscribers
+            subscribers: Vec::new(),
             image_metadata: self.image_metadata.clone(),
             roi: self.roi.clone(),
             inverted_colours: self.inverted_colours,
@@ -195,7 +193,7 @@ impl ImageHandler {
             lut: None,
             image,
             roi: None,
-            inverted_colours: true,
+            inverted_colours: false,
             image_metadata,
             subscribers: Vec::new(),
         }
@@ -257,7 +255,7 @@ impl ImageHandler {
         self.lut = None;
     }
 
-    pub fn set_threshold(&mut self, min_threshold: u16, max_threshold: u16) {
+    pub fn set_threshold(&mut self, min_threshold: u32, max_threshold: u32) {
         if let Some(lut_vec) = self.lut.as_mut() {
             for i in 0..65535 {
                 if i < min_threshold {
@@ -289,13 +287,7 @@ impl ImageHandler {
         let mut thresholded_image = self.image.clone();
 
         if let Some(lut_array) = &self.lut {
-            #[cfg(feature = "rayon")]
-            let iter = thresholded_image.par_iter_mut();
-
-            #[cfg(not(feature = "rayon"))]
             let iter = thresholded_image.iter_mut();
-
-            info!("getting image");
 
             iter.for_each(|p| {
                 let lut_val = lut_array[*p as usize];
@@ -309,18 +301,22 @@ impl ImageHandler {
             let iter = thresholded_image.iter_mut();
 
             iter.for_each(|p| {
-                let max_value = (1u16 << 14) - 1; // Maximum value for a 14-bit image
-
-                // Invert the pixel value directly
-                *p = max_value - *p;
+                let max_value = (1u16 << 14) - 1;
+                *p = max_value.saturating_sub(*p);
             });
         }
 
         thresholded_image
     }
 
-    pub fn get_image_as_bytes(&self) -> Vec<u8> {
-        self.get_image().as_bytes().to_owned()
+    pub fn get_mean(&self, roi: Option<Annotation>) -> (f64, f64) {
+        if let Some(roi) = roi {
+            let iter = ImageIterator::new(&self.image, roi);
+            calculate_mean_and_std_iter(&iter)
+        }
+        else {
+            calculate_mean_and_std_iter(&self.image.iter())
+        }
     }
 
     pub fn create_rgba_image(&self) -> Vec<u8> {
@@ -374,7 +370,6 @@ impl ImageHandler {
 pub struct ImageIterator<'a> {
     image: &'a ImageBuffer<Luma<u16>, Vec<u16>>,
     roi: Annotation,
-    current: u32,
     coord_iterators: Option<CoordIterators>,
 }
 
@@ -383,7 +378,6 @@ impl<'a> ImageIterator<'a> {
         Self {
             image,
             roi,
-            current: 0,
             coord_iterators: None,
         }
     }
@@ -393,7 +387,6 @@ impl<'a> Iterator for ImageIterator<'a> {
     type Item = &'a u16;
 
     fn next(&mut self) -> Option<Self::Item> {
-        // Determine the appropriate coordinate iterator based on ROI type
         if self.coord_iterators.is_none() {
             match &self.roi {
                 Annotation::Rect(rect) => {
@@ -429,29 +422,6 @@ impl<'a> Iterator for ImageIterator<'a> {
 impl DataExtractor for Rect {
     fn iter_values<'a>(&self, image: &'a ImageBuffer<Luma<u16>, Vec<u16>>) -> ImageIterator<'a> {
         ImageIterator::new(image, Annotation::Rect(self.clone()))
-
-        /*
-        let x1 = self.pos.x;
-        let y1 = self.pos.y;
-        let x2 = x1 + self.width;
-        let y2 = y1 + self.height;
-
-        let x1 = x1.clamp(0, image.width() - 1);
-        let y1 = y1.clamp(0, image.height() - 1);
-        let x2 = x2.clamp(0, image.width() - 1);
-        let y2 = y2.clamp(0, image.height() - 1);
-
-        let mut values = Vec::new();
-
-        for y in y1..=y2 {
-            for x in x1..=x2 {
-                let pixel = image.get_pixel(x, y);
-                values.push(&pixel.0[0]);
-            }
-        }
-
-        values.into_iter()
-        */
     }
 
     fn get_std(&self, img: &ImageBuffer<Luma<u16>, Vec<u16>>) -> f64 {
@@ -510,39 +480,10 @@ impl DataExtractor for Rect {
 impl DataExtractor for Line {
     fn iter_values<'a>(&self, image: &'a ImageBuffer<Luma<u16>, Vec<u16>>) -> ImageIterator<'a> {
         ImageIterator::new(image, Annotation::Line(self.clone()))
-
-        /*
-        let x1 = self.start.x;
-        let y1 = self.start.y;
-        let x2 = self.finish.x;
-        let y2 = self.finish.y;
-
-        let dx = x2 as f64 - x1 as f64;
-        let dy = y2 as f64 - y1 as f64;
-
-        let length = (dx.powi(2) + dy.powi(2)).sqrt();
-
-        let unit_x = dx / length;
-        let unit_y = dy / length;
-
-        let mut values = Vec::new();
-
-        for i in 0..=length as u32 {
-            let x = (x1 as f64 + unit_x * i as f64).round() as u32;
-            let y = (y1 as f64 + unit_y * i as f64).round() as u32;
-
-            if x < image.width() && y < image.height() {
-                let pixel = image.get_pixel(x, y);
-                values.push(&pixel.0[0]);
-            }
-        }
-
-        values.into_iter()
-        */
     }
 
     fn get_std(&self, img: &ImageBuffer<Luma<u16>, Vec<u16>>) -> f64 {
-        let points = crate::statistics::get_points_along_line(
+        let points = get_points_along_line(
             self.start.x as isize,
             self.start.y as isize,
             self.finish.x as isize,
@@ -577,7 +518,7 @@ impl DataExtractor for Line {
     fn get_profile(&self, img: &ImageBuffer<Luma<u16>, Vec<u16>>) -> LineProfile {
         // TODO: Handle minus cases properly
 
-        let points = crate::statistics::get_points_along_line(
+        let points = get_points_along_line(
             self.start.x as isize,
             self.start.y as isize,
             self.finish.x as isize,
@@ -612,45 +553,6 @@ impl DataExtractor for Line {
         });
 
         line_profile
-    }
-}
-
-pub struct ImageMetadataBuilder {
-    capture_settings: Option<CaptureSetting>,
-    date_created: Option<DateTime<Utc>>,
-    extra_info: Option<ExtraData>,
-}
-
-impl ImageMetadataBuilder {
-    pub fn new() -> Self {
-        ImageMetadataBuilder {
-            capture_settings: None,
-            date_created: None,
-            extra_info: None,
-        }
-    }
-
-    pub fn capture_settings(&mut self, settings: CaptureSetting) -> &mut Self {
-        self.capture_settings = Some(settings);
-        self
-    }
-
-    pub fn date_created(&mut self, date: DateTime<Utc>) -> &mut Self {
-        self.date_created = Some(date);
-        self
-    }
-
-    pub fn extra_info(&mut self, extra: ExtraData) -> &mut Self {
-        self.extra_info = Some(extra);
-        self
-    }
-
-    pub fn build(&self) -> ImageMetadata {
-        ImageMetadata {
-            capture_settings: self.capture_settings.clone(),
-            date_created: self.date_created.clone(),
-            extra_info: self.extra_info.clone(),
-        }
     }
 }
 

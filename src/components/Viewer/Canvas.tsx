@@ -10,17 +10,20 @@ import {
 import { FaChartBar } from "react-icons/fa";
 import Konva from "konva";
 import { KonvaEventObject } from "konva/lib/Node";
-import { Annotation, Point, Rect } from "../../bindings";
+import { Annotation, ImageMetadata, Point } from "../../bindings";
 import { Mode } from "../../types/draw";
 import { useContextMenu } from "mantine-contextmenu";
 import classes from "../../css/master.module.css";
 import { createChartWindow } from "../../utils/WindowCreation";
+import { renderCaptureData } from "./RenderCaptureData";
 
 interface CanvasProps {
   mode: Mode;
   imageIdx: number;
   canvasImageSource: HTMLCanvasElement | null;
-  onCursorMove: (pos: Point) => Promise<number | null>;
+  metadata: ImageMetadata | null;
+
+  onCursorMove: (pos: Point) => Promise<void>;
   onRoiChange: (roi: Annotation) => void;
   onHistogramEquilization: () => void;
   onRotate: (left: boolean) => void;
@@ -36,6 +39,7 @@ const Canvas = ({
   onRoiChange,
   onHistogramEquilization,
   onInvertColours,
+  metadata,
 }: CanvasProps): JSX.Element => {
   const stageParentRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef(null);
@@ -52,6 +56,7 @@ const Canvas = ({
   const [zoomScale, setZoomScale] = useState<number>(1.0);
   const [stageX, setStageX] = useState<number>(0.0);
   const [stageY, setStageY] = useState<number>(0.0);
+
   const handleKeyPress = useCallback(
     async (event: KeyboardEvent) => {
       switch (event.key) {
@@ -65,19 +70,9 @@ const Canvas = ({
           createChartWindow("Histogram", imageIdx, 0);
           break;
         }
-        case "a": {
-          if (event.ctrlKey) {
-            const t: Rect = {
-              pos: { x: 0, y: 0 },
-              width: sceneWidth,
-              height: sceneHeight,
-            };
-            setNewAnnotation(t);
-          }
-        }
       }
     },
-    [newAnnotation]
+    [newAnnotation, imageIdx]
   );
 
   useEffect(() => {
@@ -119,7 +114,6 @@ const Canvas = ({
 
   useEffect(() => {
     if (canvasImageSource != null) {
-      console.log("changing");
       setSceneWidth(canvasImageSource.width);
       setSceneHeight(canvasImageSource.height);
 
@@ -138,7 +132,7 @@ const Canvas = ({
       });
       */
     }
-  }, [canvasImageSource]);
+  }, [canvasImageSource, stageHeight, stageWidth]);
 
   const handleWheel = (e: Konva.KonvaEventObject<WheelEvent>): void => {
     e.evt.preventDefault();
@@ -168,10 +162,6 @@ const Canvas = ({
         setStageY(newY);
       }
     }
-  };
-
-  const handleMouseDown = (e: Konva.KonvaEventObject<MouseEvent>): void => {
-    const { x, y } = e.target.getStage()?.getRelativePointerPosition();
   };
 
   const handleMouseMove = (e: Konva.KonvaEventObject<MouseEvent>): void => {
@@ -315,7 +305,6 @@ const Canvas = ({
         width={stageWidth}
         height={stageHeight}
         onWheel={handleWheel}
-        onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
         scaleX={zoomScale}
@@ -339,6 +328,7 @@ const Canvas = ({
               ></Image>
             )}
             {getAnnotationComponent()}
+            {metadata && renderCaptureData(metadata.extra_info)}
           </Group>
         </Layer>
       </Stage>

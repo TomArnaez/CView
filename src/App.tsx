@@ -17,30 +17,28 @@ import {
   FaLongArrowAltRight,
   FaRegFileImage,
   FaSave,
+  FaLess,
 } from "react-icons/fa";
 import { useState, useEffect, useCallback } from "react";
 import {
   commands,
-  Annotation,
   events,
-  DetectorState,
   AdvancedCapture,
   LiveCapture,
-  AppData,
   CaptureManagerEventPayload,
   CaptureProgress,
   CaptureManagerStatus,
 } from "./bindings";
 import CaptureForm from "./components/CaptureForm";
 import { ImageList } from "./components/ImageList";
-import { UnlistenFn, listen } from "@tauri-apps/api/event";
+import {  listen } from "@tauri-apps/api/event";
 import { CaptureSettings } from "./components/CaptureSettings";
-import { camelCaseToWords, convert14BArrayToRGBA, streamWorker } from "./utils";
-import { invoke } from "@tauri-apps/api/primitives";
+import { camelCaseToWords } from "./utils";
 import { Mode } from "./types/draw";
 import { Viewer } from "./components/Viewer/Viewer";
 import { useImageStore } from "./stores/ImageStore";
 import classes from "./css/Button.module.css";
+import { GeneralSettingsForm } from "./components/GeneralSettingsForm";
 
 function App() {
   const [captureProgressModalOpened, setCaptureProgressModalOpened] =
@@ -49,6 +47,7 @@ function App() {
     useState(false);
   const [generalSettingsOpened, generalSettingsHandlers] = useDisclosure(false);
   const {
+    setStreaming,
     imageStacks,
     currentImageIdx,
     currentStackIdx,
@@ -57,6 +56,7 @@ function App() {
     setStack,
     updateStacks,
   } = useImageStore((state) => ({
+    setStreaming: state.setStreaming,
     imageStacks: state.imageStacks,
     currentImageIdx: state.currentImageIndex,
     currentStackIdx: state.currentStackIndex,
@@ -72,20 +72,13 @@ function App() {
       status: "DetectorDisconnected",
       dark_maps: [],
     });
-  const [streaming, setStreaming] = useState<boolean>(false);
-  const [unlistenStreamEventState, setUnlistenStreamEventState] =
-    useState<UnlistenFn | null>(null);
   const [captureProgress, setCaptureProgress] = useState<CaptureProgress | null>(null);
   const [drawMode, setDrawMode] = useState<Mode>(Mode.SelectionMode);
-  const [imageCanvas, setImageCanvas] = useState<HTMLCanvasElement | null>(
-    null
-  );
   const [live, setLive] = useState<boolean>(false);
 
   const handleUserKeyPress = useCallback(
     (event: KeyboardEvent) => {
       const { key, ctrlKey } = event;
-      const { histogramEquilization } = commands;
 
       switch (key) {
         case "ArrowRight":
@@ -93,12 +86,6 @@ function App() {
           break;
         case "ArrowLeft":
           decrementImage(1);
-          break;
-        case "i":
-          invert(false, currentImageIdx, currentStackIdx);
-          break;
-        case "r":
-          histogramEquilization(currentImageIdx, currentStackIdx);
           break;
         case "s":
           if (ctrlKey) {
@@ -110,7 +97,7 @@ function App() {
         default:
       }
     },
-    [currentImageIdx, currentStackIdx, decrementImage, incrementImage]
+    [decrementImage, incrementImage]
   );
 
   useEffect(() => {
@@ -128,55 +115,13 @@ function App() {
     });
 
     events.captureManagerEvent.listen(async (e) => {
-      console.log(e.payload)
       setCaptureManagerInfo(e.payload);
     });
 
     return () => {
       window.removeEventListener("keydown", handleUserKeyPress);
     };
-  }, []);
-
-  const refreshImage = async (): Promise<void> => {
-    await refreshCanvas(
-      convert14BArrayToRGBA(await fetchImageData(), 1031, 1536)
-    );
-  };
-
-  useEffect(() => {
-    if (imageStacks.length > 0) refreshImage();
-  }, [currentImageIdx, currentStackIdx, imageStacks]);
-
-  const fetchImageData = async (): Promise<Uint16Array> => {
-    const data = new Uint16Array(
-      await invoke("get_image_binary", {
-        imageIdx: currentImageIdx,
-        stackIdx: currentStackIdx,
-        resize: null,
-      })
-    );
-
-    return data;
-  };
-
-  const refreshCanvas = async (data: Uint8Array) => {
-    if (data == null) return;
-
-    const width = 1031;
-    const height = 1536;
-    const canvas = document.createElement("canvas");
-    canvas.width = width;
-    canvas.height = height;
-
-    const ctx = canvas.getContext("2d");
-    if (ctx != null) {
-      const imageData = ctx.createImageData(width, height);
-      imageData.data.set(data);
-      ctx.putImageData(imageData, 0, 0);
-    }
-
-    setImageCanvas(canvas);
-  };
+  }, [handleUserKeyPress, updateStacks]);
 
   const handleSaveImage = async () => {
     await commands.saveImage(currentImageIdx, currentStackIdx);
@@ -186,25 +131,12 @@ function App() {
     await commands.saveStack(currentStackIdx);
   };
 
-  const listenStreamEvent = async (): Promise<UnlistenFn> => {
-    return events.streamCaptureEvent.listen(async () => {
-      const data = new Uint16Array(await invoke("read_stream_buffer", {}));
-      if (data.length != 0) {
-        const width = 1031;
-        const height = 1536;
-        refreshCanvas(convert14BArrayToRGBA(data, width, height));
-      }
-    });
-  };
-
   const handleCapture = async (capture: AdvancedCapture) => {
     setCaptureSettingsModalOpened(false);
     await commands.runCapture(capture, true);
   };
 
   const handleGoLive = async () => {
-    let unlisten = await listenStreamEvent();
-    setUnlistenStreamEventState(await listenStreamEvent());
     setStreaming(true);
     const capture: LiveCapture = {
       exp_time: 100,
@@ -214,18 +146,8 @@ function App() {
   };
 
   const handleStopLive = async () => {
-    await commands.stopCapture();
-    if (unlistenStreamEventState != null) {
-      setUnlistenStreamEventState(null);
-    }
-    function delay(ms) {
-      return new Promise((resolve) => setTimeout(resolve, ms));
-    }
-
-    // TODO: Find a bettr way to clear stream event
-    await delay(500);
-    setImageCanvas(null);
     setStreaming(false);
+    await commands.stopCapture();
   };
 
   const handleAdvancedCapture = async () => {
@@ -238,15 +160,9 @@ function App() {
     }
   };
 
-  const handleChangeStack = async (index: number) => {
-    setStack(index);
-    console.log("changing stack");
-  };
-
   const handleOpenImages = async () => {
     await commands.openImages();
     setStack(0);
-    refreshImage(await fetchImageData());
   };
 
   const handleGenerateDarkMaps = async () => {
@@ -268,7 +184,9 @@ function App() {
         opened={generalSettingsOpened}
         onClose={generalSettingsHandlers.close}
         centered
-      ></Modal>
+      >
+        <GeneralSettingsForm/>
+      </Modal>
       <Modal
         centered
         opened={captureProgressModalOpened}
@@ -287,6 +205,7 @@ function App() {
         <CaptureSettings
           darkMapExps={captureManagerInfo.dark_maps}
           startCapture={handleCapture}
+
         />
       </Modal>
       <AppShell
@@ -460,14 +379,10 @@ function App() {
             direction="row"
             wrap="nowrap"
           >
-            {imageCanvas && (
-              <Viewer
-                drawMode={drawMode}
-                refreshImage={refreshImage}
-                imageCanvas={imageCanvas}
-                interaction={!streaming}
-              />
-            )}
+            <Viewer
+              drawMode={drawMode}
+              interaction={false}
+            />
           </Flex>
         </AppShell.Main>
       </AppShell>

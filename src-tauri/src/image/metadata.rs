@@ -10,12 +10,12 @@ use super::types::Rect;
 pub struct ImageMetadata {
     pub capture_settings: Option<CaptureSetting>,
     pub date_created: Option<DateTime<Utc>>,
-    pub extra_info: Option<ExtraData>,
+    pub extra_info: Option<CaptureResultData>,
 }
 
 #[derive(Clone, Serialize, Type, Debug)]
 #[serde(tag = "type")]
-pub enum ExtraData {
+pub enum CaptureResultData {
     SmartCaptureData(SmartCaptureData),
     SignalAccumulationData(SignalAccumulationData),
 }
@@ -35,7 +35,7 @@ pub struct SignalAccumulationData {
 pub struct ImageMetadataBuilder {
     capture_settings: Option<CaptureSetting>,
     date_created: Option<DateTime<Utc>>,
-    extra_info: Option<ExtraData>,
+    extra_info: Option<CaptureResultData>,
 }
 
 impl ImageMetadataBuilder {
@@ -57,7 +57,7 @@ impl ImageMetadataBuilder {
         self
     }
 
-    pub fn extra_info(&mut self, extra: ExtraData) -> &mut Self {
+    pub fn extra_info(&mut self, extra: CaptureResultData) -> &mut Self {
         self.extra_info = Some(extra);
         self
     }

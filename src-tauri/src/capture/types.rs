@@ -5,7 +5,7 @@ use std::{
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc, Mutex,
-    },
+    }, time::Duration,
 };
 
 use crate::{image::ImageHandler, wrapper::SLImageRs};
@@ -50,7 +50,6 @@ pub enum AdvancedCapture {
     MultiCapture,
     LiveCapture,
 }
-
 
 pub enum CaptureStreamItem {
     Image(ImageHandler),

@@ -6,10 +6,9 @@ use super::{
 
 use crate::{
     image::{
-        ExtraData, ImageHandler, ImageMetadata, ImageMetadataBuilder, SignalAccumulationData,
-        SmartCaptureData,
+        CaptureResultData, ImageHandler, ImageMetadata, ImageMetadataBuilder, SignalAccumulationData,
+        SmartCaptureData, snr_threaded,
     },
-    statistics::snr_threaded,
     wrapper::SLImageRs,
 };
 
@@ -17,7 +16,7 @@ use futures::stream::{self, StreamExt};
 
 use futures_core::Stream;
 use image::{ImageBuffer, Luma};
-use log::{info};
+use log::info;
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use std::{
@@ -143,7 +142,7 @@ impl AdvCapture for SmartCapture {
                         let snr_results = snr_threaded(&image_buffer, window_size).unwrap();
                         let image_metadata = ImageMetadataBuilder::new()
                             .capture_settings(capture_settings.clone())
-                            .extra_info(ExtraData::SmartCaptureData(SmartCaptureData {
+                            .extra_info(CaptureResultData::SmartCaptureData(SmartCaptureData {
                                 signal_noise_ratio: snr_results.0.clone(),
                                 background_rect: snr_results.1.clone(),
                                 foreground_rect: snr_results.2.clone(),
@@ -216,7 +215,7 @@ impl AdvCapture for SignalAccumulationCapture {
                             image_buffer,
                             ImageMetadataBuilder::new()
                                 .capture_settings(capture_settings.clone())
-                                .extra_info(ExtraData::SignalAccumulationData(
+                                .extra_info(CaptureResultData::SignalAccumulationData(
                                     SignalAccumulationData {
                                         accumulated_exp_time: *accumulated_exp_time.lock().unwrap(),
                                     },

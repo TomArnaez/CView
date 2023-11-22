@@ -7,6 +7,7 @@ macro_rules! p {
 }
 
 fn main() -> miette::Result<()> {
+    /*
     let mut windows = tauri_build::WindowsAttributes::new();
     windows = windows.app_manifest(r#"
     <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
@@ -33,6 +34,8 @@ fn main() -> miette::Result<()> {
     "#);
 
     tauri_build::try_build(  tauri_build::Attributes::new().windows_attributes(windows));
+    */
+    tauri_build::build();
 
     let path = PathBuf::from("src");
     let include_path = PathBuf::from("C:\\SLDevice\\SDK\\headers");

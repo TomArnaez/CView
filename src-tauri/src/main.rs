@@ -22,8 +22,6 @@ mod commands {
 }
 mod events;
 mod image;
-mod operations;
-mod statistics;
 mod utils;
 mod wrapper;
 
@@ -38,15 +36,11 @@ use concurrent_queue::ConcurrentQueue;
 use events::{
     CancelCaptureEvent, HistogramEvent, ImageStateEvent, StreamCaptureEvent,
 };
-use http::{header::*, response::Builder as ResponseBuilder};
 use image::{ImageHandler, ImageService};
-use log::{error, info};
-use std::{collections::HashMap, fs, path::PathBuf, sync::Mutex};
-use tauri::{http, AppHandle, Manager, Runtime};
+use std::sync::Mutex;
+use tauri::{http, Manager};
 
 use tauri_plugin_log::{fern::colors::ColoredLevelConfig, Target, TargetKind};
-
-use crate::wrapper::SLImageRs;
 
 pub struct StreamBuffer {
     pub q: ConcurrentQueue<ImageHandler>,
@@ -122,6 +116,7 @@ fn main() {
             capture::commands::run_capture,
             capture::commands::read_stream_buffer
         ])
+        /* Old way of streaming images to fronrtend
         .register_asynchronous_uri_scheme_protocol("stream", move |app, request, responder| {
             let handle = app.clone();
 
@@ -135,7 +130,7 @@ fn main() {
                         ResponseBuilder::new()
                             .header(CONTENT_TYPE, "text/plain")
                             .header("Access-Control-Allow-Origin", "*") // Set CORS heade
-                            .body(image_handler.get_image_as_bytes())
+                            .body(image_handler.get_image().as_bytes().to_owned())
                             .unwrap(),
                     );
                 });
@@ -149,6 +144,7 @@ fn main() {
                 );
             }
         })
+        */
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

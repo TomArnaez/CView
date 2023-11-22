@@ -106,6 +106,7 @@ dependencies = [
  "concurrent-queue",
  "cxx",
  "enum_dispatch",
+ "erased-serde",
  "futures",
  "futures-core",
  "futures-util",
@@ -4031,6 +4032,7 @@ dependencies = [
  "specta-macros",
  "tauri",
  "thiserror",
+ "time 0.3.25",
 ]
 
 [[package]]

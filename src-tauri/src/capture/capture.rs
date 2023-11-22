@@ -1,15 +1,15 @@
 use std::{
     fmt,
     pin::Pin,
-    sync::{mpsc::{channel, Receiver}, atomic::{AtomicBool, Ordering}, Arc},
+    sync::{atomic::{AtomicBool, Ordering}, Arc},
     thread,
-    time::{Duration, Instant},
+    time::{Instant, Duration},
 };
 
 use async_stream::stream;
 use futures_core::stream::Stream;
 use futures_util::StreamExt;
-use log::{debug, error, info};
+use log::error;
 use serde::Serialize;
 use specta::Type;
 use thiserror::Error;

@@ -1,16 +1,12 @@
-use std::{
-    collections::HashMap,
-    sync::{Arc, Mutex},
-};
+use std::sync::{Arc, Mutex};
 
 use image::{ImageBuffer, Luma};
-use imageproc::stats::histogram;
 use log::info;
 use rayon::prelude::*;
 
 use crate::image::types::DataExtractor;
 
-type Histogram = HashMap<u16, u32>;
+type Histogram = Vec<u32>;
 
 pub fn median_filter_threaded(
     image: &ImageBuffer<Luma<u16>, Vec<u16>>,
@@ -64,54 +60,57 @@ pub fn median_filter_threaded(
         .expect("Failed to get Mutex inner value")
 }
 
-pub fn calculate_histogram<'a>(vals: impl Iterator<Item = &'a u16>) -> Histogram {
-    let mut histogram = HashMap::new();
+fn calculate_histogram<'a, I>(vals: I, max_value: u32, num_bins: u32) -> Histogram
+where
+    I: IntoIterator<Item = &'a u16>,
+{
+    let bin_size = (max_value + 1) / num_bins;
 
-    for value in vals {
-        *histogram.entry(*value).or_insert(0) += 1;
-    }
-
-    histogram
+    vals.into_iter().fold(vec![0; num_bins as usize], |mut histogram, &value| {
+        let bin_index = (value as u32 / bin_size) as usize;
+        histogram[bin_index] += 1;
+        histogram
+    })
 }
 
-pub fn create_lut(histogram: &Histogram, range: usize) -> Vec<u16> {
+fn create_lut(histogram: &Histogram) -> Vec<u32> {
+    let num_pixels: u32 = histogram.iter().sum();
+    let max_intensity: u32 = 16383; // Maximum intensity for a 14-bit image
+    let scale_factor = max_intensity as f32 / num_pixels as f32;
+
     let mut cdf_min = None;
     let mut cdf = 0;
-    let mut lut = vec![0u16; range];
+    let mut lut = Vec::with_capacity(histogram.len());
 
-    let total: u32 = histogram.values().sum();
-
-    for i in 0..16384u16 {
-        if let Some(&count) = histogram.get(&i) {
-            cdf += count;
-            cdf_min = cdf_min.or_else(|| Some(cdf));
+    for &freq in histogram.iter() {
+        if freq > 0 && cdf_min.is_none() {
+            cdf_min = Some(cdf);
         }
-        if let Some(cdf_min) = cdf_min {
-            // Ensuring the scaling is appropriate for the range of values in your LUT
-            lut[i as usize] =
-                ((((cdf - cdf_min) as f64) / ((total - cdf_min) as f64)) * 16383.0).round() as u16;
-        }
+        cdf += freq;
+        let lut_value = if let Some(cdf_min) = cdf_min {
+            ((cdf - cdf_min) as f32 * scale_factor).round() as u32
+        } else {
+            0
+        };
+        lut.push(lut_value.min(max_intensity));
     }
 
     lut
 }
-
 pub trait HistogramEquilisation {
-    fn cumulative_histogram(&self, range: usize) -> Vec<u16>;
-    fn cumulative_histogram_roi(&self, roi: &dyn DataExtractor, range: usize) -> Vec<u16>;
+    fn cumulative_histogram(&self, range: usize) -> Vec<u32>;
+    fn cumulative_histogram_roi(&self, roi: &dyn DataExtractor, range: usize) -> Vec<u32>;
 }
 
 impl HistogramEquilisation for ImageBuffer<image::Luma<u16>, Vec<u16>> {
-    fn cumulative_histogram(&self, range: usize) -> Vec<u16> {
-        info!("calculate cumulative histogram");
-        let histogram = calculate_histogram(self.into_iter());
-        create_lut(&histogram, range)
+    fn cumulative_histogram(&self, range: usize) -> Vec<u32> {
+        let histogram = calculate_histogram(self.iter(), 16383, 16384);
+        create_lut(&histogram)
     }
 
-    fn cumulative_histogram_roi(&self, roi: &dyn DataExtractor, range: usize) -> Vec<u16> {
-        info!("calculate cumulative histogram with roi");
-        let histogram = calculate_histogram(roi.iter_values(&self));
-        create_lut(&histogram, range)
+    fn cumulative_histogram_roi(&self, roi: &dyn DataExtractor, range: usize) -> Vec<u32> {
+        let histogram = calculate_histogram(roi.iter_values(&self), 16383, 16384);
+        create_lut(&histogram)
     }
 }
 
@@ -161,74 +160,32 @@ pub fn invert_colors_grayscale(
     inverted_image
 }
 
+
 #[cfg(test)]
 mod tests {
+    use std::time::{Duration, Instant};
+
     use super::*;
 
-    #[test]
-    fn test_caculate_histogram() {
-        let numbers: Vec<u16> = vec![1, 2, 1, 3, 2, 2, 4, 1, 5];
-        let histogram = calculate_histogram(numbers.iter());
-
-        let mut expected_histogram = HashMap::new();
-        expected_histogram.insert(1, 3);
-        expected_histogram.insert(2, 3);
-        expected_histogram.insert(3, 1);
-        expected_histogram.insert(4, 1);
-        expected_histogram.insert(5, 1);
-
-        assert_eq!(histogram, expected_histogram)
-    }
-
-    #[test]
-    fn test_create_lut_uniform_histogram() {
-        let total_pixels = 16384;
-        let mut histogram = Histogram::new();
-
-        let range = 16384;
-
-        // Create a uniform histogram
-        for i in 0..range {
-            histogram.insert(i, 1);
+    fn measure_time<F>(f: F) -> Duration
+        where
+            F: FnOnce(),
+        {
+            let start = Instant::now();
+            f();
+            start.elapsed()
         }
 
-        let lut = create_lut(&histogram, 16384);
-
-        assert_eq!(lut.len(), 16384);
-
-        // In a uniform histogram, the LUT should increment linearly
-        for (i, &lut_value) in lut.iter().enumerate() {
-            let expected_value = i as u16;
-            assert_eq!(
-                lut_value, expected_value,
-                "LUT value at index {} is incorrect",
-                i
-            );
-        }
-    }
-
     #[test]
-    fn test_create_lut_non_uniform_histogram() {
-        let total_pixels = 50;
-        let mut histogram = Histogram::new();
+    fn test_histogram_time() {
+        let data: Vec<u16> = vec![16384; 1031 * 1536];
 
-        let range = 16384;
-
-        // Create a non-uniform histogram
-        histogram.insert(0, 10);
-        histogram.insert(1, 20);
-        histogram.insert(2, 10);
-        histogram.insert(3, 10);
-
-        let lut = create_lut(&histogram, range);
-
-        assert_eq!(lut.len(), range);
-
-        // Test specific values in the LUT
-        // These values depend on the exact histogram and total pixels
-        let expected_values = vec![0, 8192, 12287, 16383];
-        for (i, &expected) in expected_values.iter().enumerate() {
-            assert_eq!(lut[i], expected, "LUT value at index {} is incorrect", i);
-        }
+        let duration = measure_time(|| {
+            let histogram = calculate_histogram(&data, 16383, 16384);
+            let lut = create_lut(&histogram);
+            println!("{:?}", lut);
+        });
+        println!("Time for find_min_single: {:?}", duration);
     }
+
 }

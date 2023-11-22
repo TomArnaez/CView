@@ -111,6 +111,37 @@ pub fn snr_threaded(image: &ImageBuffer<Luma<u16>, Vec<u16>>, window_size: u32) 
     Ok((snr, state.bg_rect.clone(), state.fg_rect.clone()))
 }
 
+pub fn calculate_mean_and_std_iter<'a, I>(mut vals: I) -> (f64, f64)
+where
+    I: IntoIterator<Item = &'a u16>,
+{
+    let mut sum = 0.0;
+    let mut count = 0;
+
+    // First pass to calculate mean
+    for &val in vals.into_iter() {
+        sum += val as f64;
+        count += 1;
+    }
+
+    if count == 0 {
+        return (0.0, 0.0); // Avoid division by zero
+    }
+
+    let mean = sum / count as f64;
+
+    // Second pass to calculate standard deviation
+    let mut variance_sum = 0.0;
+    for &val in vals.into_iter() {
+        variance_sum += (val as f64 - mean).powi(2);
+    }
+
+    let variance = variance_sum / count as f64;
+    let std_dev = variance.sqrt();
+
+    (mean, std_dev)
+}
+
 fn calculate_mean_and_std(buffer: &ImageBuffer<Luma<u16>, Vec<u16>>) -> (f64, f64) {
     let width = buffer.width();
     let height = buffer.height();

@@ -19,6 +19,7 @@ use super::capture::{CaptureError, CaptureSetting};
 
 // Required for opening camera on a detector
 const BUFFER_DEPTH: u32 = 100;
+const HEARTBEAT_REFRESH_TIME_MILLIS: u64 = 100;
 
 #[derive(PartialEq, Clone, Serialize, Debug, Type)]
 pub enum DetectorStatus {
@@ -118,15 +119,16 @@ impl DetectorController {
         info!("Launching heartbeat thread");
         tauri::async_runtime::spawn(async move {
             loop {
-                thread::sleep(Duration::from_millis(100));
+                thread::sleep(Duration::from_millis(HEARTBEAT_REFRESH_TIME_MILLIS));
 
                 let mut detector_status = detector_status_mutex.lock().unwrap();
 
                 match *detector_status {
                     DetectorStatus::Disconnected => {
-                        match detector.open_camera(100) {
+                        match detector.open_camera(BUFFER_DEPTH) {
                             Ok(_) => {
                                 info!("Connected to device");
+                                *detector_status = DetectorStatus::Available;
                             },
                             Err(e) => debug!("Error opening camera")
                         }

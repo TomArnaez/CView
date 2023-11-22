@@ -1,33 +1,49 @@
-import { useState } from "react";
-import { Annotation, Point, commands } from "../../bindings";
+import { useEffect, useState } from "react";
+import { Annotation, ImageMetadata, Point, commands } from "../../bindings";
 import Canvas from "./Canvas";
 import { Mode } from "../../types/draw";
 import CanvasOverlay from "./Overlay";
 import { useImageStore } from "../../stores/ImageStore";
 
 type ViewerProps = {
-  imageCanvas: HTMLCanvasElement;
   drawMode: Mode;
   interaction: boolean;
-  refreshImage: () => Promise<void>;
 };
 
 export const Viewer = ({
-  imageCanvas,
   drawMode,
-  interaction,
-  refreshImage,
 }: ViewerProps): JSX.Element => {
+  const [imageCanvas, setImageCanvas] = useState<HTMLCanvasElement | null>(null);
+  const [ImageMetadata, setImageMetadata] = useState<ImageMetadata | null>(null);
   const [mousePos, setMousePos] = useState<Point>({ x: 0, y: 0 });
   const [pixelValue, setPixelValue] = useState<number>(0);
-  const { currentImageIdx, currentStackIdx, getImageMetadata } = useImageStore(
+  const { currentImageIdx, currentStackIdx, currentImage, refreshCurrentImage, getCurrentMetadata } = useImageStore(
     (state) => ({
       imageStacks: state.imageStacks,
+      currentImage: state.currentImage,
       currentImageIdx: state.currentImageIndex,
       currentStackIdx: state.currentStackIndex,
-      getImageMetadata: state.getImageMetaData,
+      refreshCurrentImage: state.refreshCurrentImage,
+      getCurrentMetadata: state.getCurrentMetaData,
     })
   );
+
+  useEffect(() => {
+    if (currentImage != null) {
+      const canvas = document.createElement("canvas");
+      canvas.width = currentImage.width;
+      canvas.height = currentImage.height;
+      const ctx = canvas.getContext("2d");
+      if (ctx != null) {
+        const imageData = ctx.createImageData(currentImage.width, currentImage.height);
+        imageData.data.set(currentImage.data);
+        ctx.putImageData(imageData, 0, 0);
+        setImageCanvas(canvas);
+        setImageMetadata(getCurrentMetadata());
+        console.log(getCurrentMetadata());
+      }
+    }
+  }, [currentImage, getCurrentMetadata, setImageCanvas, setImageMetadata])
 
   const handleRoiChange = async (annotation: Annotation) => {
     if (currentImageIdx != null && currentStackIdx != null) {
@@ -44,14 +60,14 @@ export const Viewer = ({
   const handleHistogramEquilization = async () => {
     if (currentImageIdx != null && currentStackIdx != null) {
       await commands.histogramEquilization(currentImageIdx, currentStackIdx);
-      refreshImage();
+      refreshCurrentImage();
     }
   };
 
   const handleInvertColours = async () => {
     if (currentImageIdx != null && currentStackIdx != null) {
       await commands.invertColours(currentImageIdx, currentStackIdx);
-      refreshImage();
+      refreshCurrentImage();
     }
   };
 
@@ -70,25 +86,30 @@ export const Viewer = ({
 
   return (
     <div style={{ position: "relative", width: "100%", height: "100%" }}>
-      <Canvas
-        mode={drawMode}
-        canvasImageSource={imageCanvas}
-        imageIdx={currentImageIdx}
-        onCursorMove={handleCursorMove}
-        onRoiChange={handleRoiChange}
-        onRotate={handleRotate}
-        onHistogramEquilization={handleHistogramEquilization}
-        onInvertColours={handleInvertColours}
-        onFlip={handleFlip}
-      />
-      {interaction && (
-        <CanvasOverlay
-          pos={mousePos}
-          adu={pixelValue}
+    {imageCanvas && (
+      <>
+        <Canvas
+          mode={drawMode}
+          canvasImageSource={imageCanvas}
           imageIdx={currentImageIdx}
-          metadata={getImageMetadata(currentImageIdx, currentStackIdx)}
+          onRoiChange={handleRoiChange}
+          onRotate={handleRotate}
+          onCursorMove={handleCursorMove}
+          onHistogramEquilization={handleHistogramEquilization}
+          onInvertColours={handleInvertColours}
+          onFlip={handleFlip}
+          metadata={ImageMetadata}
         />
-      )}
+        {ImageMetadata && (
+          <CanvasOverlay
+            pos={mousePos}
+            adu={pixelValue}
+            imageIdx={currentImageIdx}
+            metadata={ImageMetadata}
+          />
+        )}
+      </>
+    )}
     </div>
   );
 };

@@ -4,27 +4,30 @@ export const streamWorker = new ComlinkWorker<typeof import("./workers/StreamWor
     new URL("workers/StreamWorker.ts", import.meta.url)
   );
 
-export const convert14BArrayToRGBA = (array: Uint16Array, width: number, height: number): Uint8Array => {
+export const convert14BArrayToRGBA = (array: Uint16Array, width: number, height: number, saturated_threshold: number | null): Uint8Array => {
   const data = new Uint8Array(width * height * 4);
 
   for (let i = 0; i < width * height; i++) {
-      const grayscaleValue = convert14BitTo8Bit(array[i]);
+      const val = array[i];
+      const saturated = saturated_threshold != null && val > saturated_threshold;
+
+      if (saturated) {
+        console.log(val);
+      }
+
+      const grayscaleValue = convert14BitTo8Bit(val);
       const pixelIndex = i * 4;
 
-      data.fill(grayscaleValue, pixelIndex, pixelIndex + 3);
-      data[pixelIndex + 3] = 255; // Alpha channel (fully opaque)
-      /*
-      // set saturated pixels to red
-      if (grayscaleValue === 255) {
+      if (saturated) {
           data[pixelIndex] = 255
           data[pixelIndex + 1] = 0
           data[pixelIndex + 2] = 0
           data[pixelIndex + 3] = 255 
-      } else {
-          data.fill(grayscaleValue, pixelIndex, pixelIndex + 3);
-          data[pixelIndex + 3] = 255; // Alpha channel (fully opaque)
       }
-      */
+      else {
+      data.fill(grayscaleValue, pixelIndex, pixelIndex + 3);
+      data[pixelIndex + 3] = 255; // Alpha channel (fully opaque)
+      }
   }
 
   return data;

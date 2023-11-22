@@ -24,7 +24,7 @@ tauri-plugin-dialog = "2.0.0-alpha"
 tauri-plugin-window = "2.0.0-alpha"
 tauri-specta = { path = "C:/dev/repos/tauri-specta", features = ["javascript", "typescript"] }
 tokio = {version = "1.34.0", features= ["macros"] }
-specta = { path = "C:/dev/repos/specta", features= ["chrono"] }
+specta = { path = "C:/dev/repos/specta", features= ["chrono", "time"] }
 chrono = {version="0.4.28", features = ["serde"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
@@ -52,6 +52,7 @@ futures-core = "0.3.29"
 futures-util = "0.3.29"
 async-stream = "0.3.5"
 futures = "0.3.29"
+erased-serde = "0.3.31"
 
 
 [features]

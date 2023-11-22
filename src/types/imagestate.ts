@@ -1,7 +1,7 @@
 import { ImageStack } from "../bindings";
 
 export type Image = {
-  data: Uint16Array;
+  data: Uint8Array;
   width: number;
   height: number;
 }

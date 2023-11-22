@@ -28,7 +28,7 @@ use super::{
     types::{
         AdvCapture, AdvancedCapture, CaptureManagerEvent, CaptureManagerEventPayload,
         CaptureManagerInfo, CaptureManagerStatus, CaptureStreamItem,
-    }, advanced_capture::{DarkMapCapture, LiveCapture},
+    }, advanced_capture::LiveCapture,
 };
 
 pub struct CaptureManager {
@@ -267,7 +267,6 @@ impl CaptureManager {
             match status {
                 DetectorStatus::Available => {
                     if matches!(info.status, CaptureManagerStatus::Capturing(_)) {
-                        info!("got here");
                     } else {
                         if dark_maps.lock().unwrap().len() == 0 {
                             info.status = CaptureManagerStatus::DarkMapsRequired

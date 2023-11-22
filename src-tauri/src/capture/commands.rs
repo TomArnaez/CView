@@ -7,8 +7,10 @@ use crate::ImageService;
 use crate::StreamBuffer;
 use chrono::Utc;
 use futures_util::{pin_mut, StreamExt};
+use image::EncodableLayout;
 use log::error;
 use log::info;
+use tauri::Manager;
 use std::sync::Mutex;
 use tauri::ipc::Response;
 use tauri::AppHandle;
@@ -44,6 +46,7 @@ pub async fn run_capture(
         match stream_item {
         CaptureStreamItem::Image(mut image_handler) => {
             image_handler.apply_histogram_equilization();
+            image_handler.invert_colours();
 
             if save_capture {
                 image_handlers.push(image_handler.clone());
@@ -58,6 +61,7 @@ pub async fn run_capture(
                 Err(e) => error!("Failed to stream capture event event with error {e}"),
                 _ => {}
             }
+
         },
         CaptureStreamItem::Progress(progress) => {
             info!("got progress event");
@@ -69,16 +73,23 @@ pub async fn run_capture(
         } 
     }
 
-    if save_capture {
-        image_service_mutex
-            .lock()
-            .unwrap()
-            .add_image_stack(ImageStack {
-                timestamp: Some(Utc::now()),
-                image_handlers,
-                capture: Some(capture),
-            });
+    let image_stack = ImageStack {
+        timestamp: Some(Utc::now()),
+        image_handlers,
+        capture: Some(capture),
+    };
+
+    if (save_capture) {
+        if let Ok(local_data_dir) = app.path().local_data_dir() {
+
+        }
     }
+
+    image_service_mutex
+        .lock()
+        .unwrap()
+        .add_image_stack(image_stack);
+
 
     Ok(())
 }
@@ -97,7 +108,7 @@ pub fn read_stream_buffer(stream_buffer_mutex: State<Mutex<StreamBuffer>>) -> Re
     let stream_buffer = stream_buffer_mutex.lock().unwrap();
 
     if let Ok(image_handler) = stream_buffer.q.pop() {
-        return Response::new(image_handler.get_image_as_bytes());
+        return Response::new(image_handler.get_image().as_bytes().to_owned());
     }
 
     Response::new(vec![])
