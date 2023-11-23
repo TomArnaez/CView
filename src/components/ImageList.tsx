@@ -4,7 +4,7 @@ import classes from "../css/master.module.css";
 import { commands } from "../bindings";
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/primitives";
-import { camelCaseToWords, convert14BArrayToRGBA } from "../utils";
+import { camelCaseToWords } from "../utils";
 import { useContextMenu } from "mantine-contextmenu";
 import { useImageStore } from "../stores/ImageStore";
 
@@ -47,7 +47,7 @@ export const ImageList = (): JSX.Element => {
     }
     return canvas;
   };
-  
+
   return (
     <ScrollArea type="auto">
       {imageStacks.map((stack, stackIdx: number) => {

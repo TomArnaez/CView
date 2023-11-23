@@ -1,0 +1,22 @@
+.stream {
+    width: 100%;
+    height: 100%;
+    font-size: small;
+    background-color: lightblue;
+
+    /* Sub-node for label */
+    .label {
+        color: white;
+        font-size: 12px;
+    }
+
+    /* Sub-node for root */
+    .root {
+        padding: 10px;
+        border: 1px solid #ddd;
+    }
+}
+
+.stream.live {
+    background-color: red;
+}

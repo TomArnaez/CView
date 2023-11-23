@@ -40,11 +40,16 @@ import { camelCaseToWords } from "./utils";
 import { Mode } from "./types/draw";
 import { Viewer } from "./components/Viewer/Viewer";
 import { useImageStore } from "./stores/ImageStore";
-import classes from "./css/Button.module.css";
 import { GeneralSettingsForm } from "./components/GeneralSettingsForm";
 import { DarkMapGenerationForm } from "./components/DarkMapGenerationForm";
 
-console.log(classes)
+import "@mantine/core/styles.css";
+import "mantine-contextmenu/styles.css";
+import classes from "./css/Button.module.css"
+import streamButtonClasses from "./css/StreamButton.module.css"
+
+console.log(streamButtonClasses)
+
 
 function App() {
   const [captureProgressModalOpened, setCaptureProgressModalOpened] =
@@ -218,6 +223,11 @@ function App() {
           startCapture={handleCapture}
         />
       </Modal>
+      <Button
+              classNames = {{
+                root: classes.root
+              }}
+            >Helo</Button>
       <AppShell
         style={{
           width: "100vw",
@@ -288,9 +298,10 @@ function App() {
               </Menu.Dropdown>
             </Menu>
             <Button
-              style={{
-                height: "100%",
-              }}
+            classNames={{
+              root: classes.root,
+              label: classes.label
+            }}
               variant="filled"
               fullWidth
               color={captureManagerInfo.status == "Available" ? "blue" : "red"}
@@ -357,20 +368,7 @@ function App() {
             }}
           >
             <Button
-              className={classes.button}
-
-              variant="filled"
-              color={live ? "red" : "blue"}
-              disabled={
-                captureManagerInfo.status == "DetectorDisconnected" ||
-                captureManagerInfo.status == "DarkMapsRequired" ||
-                captureManagerInfo.status == "DefectMapsRequired"
-              }
-              onClick={() => {
-                live ? handleStopLive() : handleGoLive();
-                setLive(!live);
-              }}
-              fullWidth
+              className={`${streamButtonClasses.stream} ${streamButtonClasses.live}` }
             >
               <div className={classes.label}>
                 {live ? "Stop Live" : "Go Live"}
