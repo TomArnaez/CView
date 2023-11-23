@@ -4,9 +4,12 @@ use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-use crate::image::types::{Rect, Point};
+use crate::image::types::{Point, Rect};
 
-pub fn snr(image: &mut ImageBuffer<Luma<u16>, Vec<u16>>, window_size: u32) -> Result<(f64, Rect, Rect), ()> {
+pub fn snr(
+    image: &mut ImageBuffer<Luma<u16>, Vec<u16>>,
+    window_size: u32,
+) -> Result<(f64, Rect, Rect), ()> {
     let mut min_mean: f64 = u32::MAX as f64;
     let mut max_mean: f64 = 0.0;
 
@@ -15,19 +18,13 @@ pub fn snr(image: &mut ImageBuffer<Luma<u16>, Vec<u16>>, window_size: u32) -> Re
     let mut bg_rect = Rect {
         width: window_size,
         height: window_size,
-        pos: Point {
-            x: 0,
-            y: 0
-        }
+        pos: Point { x: 0, y: 0 },
     };
 
     let mut fg_rect = Rect {
         width: window_size,
         height: window_size,
-        pos: Point {
-            x: 0,
-            y: 0
-        }
+        pos: Point { x: 0, y: 0 },
     };
 
     let width: u32 = image.width();
@@ -39,8 +36,7 @@ pub fn snr(image: &mut ImageBuffer<Luma<u16>, Vec<u16>>, window_size: u32) -> Re
 
     for x in 0..width - window_size {
         for y in 0..height - window_size {
-            let window =
-                image.view(x, y, window_size, window_size).to_image();
+            let window = image.view(x, y, window_size, window_size).to_image();
 
             let (window_mean, window_std_dev) = calculate_mean_and_std(&window);
 
@@ -60,12 +56,17 @@ pub fn snr(image: &mut ImageBuffer<Luma<u16>, Vec<u16>>, window_size: u32) -> Re
 
     println!("{} {}", max_mean, min_mean);
 
-    Ok(((max_mean - min_mean) / (min_mean - dark_offset).abs(), bg_rect, fg_rect))
+    Ok((
+        (max_mean - min_mean) / (min_mean - dark_offset).abs(),
+        bg_rect,
+        fg_rect,
+    ))
 }
 
-
-
-pub fn snr_threaded(image: &ImageBuffer<Luma<u16>, Vec<u16>>, window_size: u32) -> Result<(f64, Rect, Rect), ()> {
+pub fn snr_threaded(
+    image: &ImageBuffer<Luma<u16>, Vec<u16>>,
+    window_size: u32,
+) -> Result<(f64, Rect, Rect), ()> {
     let width = image.width();
     let height = image.height();
 
@@ -83,13 +84,21 @@ pub fn snr_threaded(image: &ImageBuffer<Luma<u16>, Vec<u16>>, window_size: u32) 
     let shared_state = Arc::new(Mutex::new(SharedState {
         min_mean: u32::MAX as f64,
         max_mean: 0.0,
-        bg_rect: Rect { width: window_size, height: window_size, pos: Point { x: 0, y: 0 } },
-        fg_rect: Rect { width: window_size, height: window_size, pos: Point { x: 0, y: 0 } },
+        bg_rect: Rect {
+            width: window_size,
+            height: window_size,
+            pos: Point { x: 0, y: 0 },
+        },
+        fg_rect: Rect {
+            width: window_size,
+            height: window_size,
+            pos: Point { x: 0, y: 0 },
+        },
     }));
 
-    let positions = (0..width - window_size).flat_map(move |x| {
-        (0..height - window_size).map(move |y| (x, y))
-    }).collect::<Vec<_>>(); 
+    let positions = (0..width - window_size)
+        .flat_map(move |x| (0..height - window_size).map(move |y| (x, y)))
+        .collect::<Vec<_>>();
 
     positions.into_par_iter().for_each(|(x, y)| {
         let window = image.view(x, y, window_size, window_size).to_image();
@@ -111,15 +120,15 @@ pub fn snr_threaded(image: &ImageBuffer<Luma<u16>, Vec<u16>>, window_size: u32) 
     Ok((snr, state.bg_rect.clone(), state.fg_rect.clone()))
 }
 
-pub fn calculate_mean_and_std_iter<'a, I>(mut vals: I) -> (f64, f64)
+pub fn calculate_mean_and_std_iter<'a, I>(vals: I) -> (f64, f64)
 where
-    I: IntoIterator<Item = &'a u16>,
+    I: IntoIterator<Item = &'a u16> + Clone,
 {
     let mut sum = 0.0;
     let mut count = 0;
 
     // First pass to calculate mean
-    for &val in vals.into_iter() {
+    for &val in vals.clone().into_iter() {
         sum += val as f64;
         count += 1;
     }
@@ -210,15 +219,21 @@ mod tests {
     use std::ops::DerefMut;
 
     use super::*;
-    use image::{ImageBuffer, Luma, GenericImage};
+    use image::{GenericImage, ImageBuffer, Luma};
     use log::info;
-
 
     fn create_test_image(width: u32, height: u32, value: u16) -> ImageBuffer<Luma<u16>, Vec<u16>> {
         ImageBuffer::from_pixel(width, height, Luma([value]))
     }
 
-    fn set_region_to_value(img: &mut ImageBuffer<Luma<u16>, Vec<u16>>, x: u32, y: u32, width: u32, height: u32, value: u16) {
+    fn set_region_to_value(
+        img: &mut ImageBuffer<Luma<u16>, Vec<u16>>,
+        x: u32,
+        y: u32,
+        width: u32,
+        height: u32,
+        value: u16,
+    ) {
         for i in x..x + width {
             for j in y..y + height {
                 if i < img.width() && j < img.height() {

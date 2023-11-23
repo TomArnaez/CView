@@ -31,11 +31,9 @@ use capture::{
     capture_manager::CaptureManager,
     types::{CaptureManagerEvent, CaptureProgressEvent},
 };
-use charts::types::LineProfileEvent;
+use charts::types::{ChartDataEvent, LineProfileEvent};
 use concurrent_queue::ConcurrentQueue;
-use events::{
-    CancelCaptureEvent, HistogramEvent, ImageStateEvent, StreamCaptureEvent,
-};
+use events::{CancelCaptureEvent, HistogramEvent, ImageStateEvent, StreamCaptureEvent};
 use image::{ImageHandler, ImageService};
 use std::sync::Mutex;
 use tauri::{http, Manager};
@@ -78,6 +76,7 @@ fn main() {
                 CaptureProgressEvent,
                 CancelCaptureEvent,
                 CaptureManagerEvent,
+                ChartDataEvent,
                 ImageStateEvent,
                 LineProfileEvent,
                 HistogramEvent
@@ -119,11 +118,9 @@ fn main() {
         /* Old way of streaming images to fronrtend
         .register_asynchronous_uri_scheme_protocol("stream", move |app, request, responder| {
             let handle = app.clone();
-
             let stream_buffer_mutex: tauri::State<'_, Mutex<StreamBuffer>> =
                 handle.state::<Mutex<StreamBuffer>>();
             let stream_buffer = stream_buffer_mutex.lock().unwrap();
-
             if let Ok(image_handler) = stream_buffer.q.pop() {
                 std::thread::spawn(move || {
                     responder.respond(

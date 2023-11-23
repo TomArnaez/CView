@@ -3,10 +3,11 @@ use log::{error, info};
 use tauri::{AppHandle, Window};
 use tauri_specta::Event;
 
-use crate::{
-    charts::types::LineProfileEvent,
-    image::{types::DataExtractor, Annotation, LineProfile},
+use crate::image::{
+    calculate_histogram, types::DataExtractor, Annotation, ImageIterator, LineProfile,
 };
+
+use super::types::{ChartData, ChartDataEvent};
 
 pub trait ChartSubscriber {
     fn update(&self, image: &ImageBuffer<Luma<u16>, Vec<u16>>, roi: Option<Annotation>);
@@ -26,9 +27,10 @@ impl ChartSubscriber for LineProfileSubscriber {
     fn update(&self, image: &ImageBuffer<Luma<u16>, Vec<u16>>, roi: Option<Annotation>) {
         if let Some(roi) = roi {
             let line_profile_data: LineProfile = roi.get_profile(&image);
-
-            if let Err(e) = LineProfileEvent(line_profile_data).emit(&self.window) {
-                error!("Failed to update line profile with error {e}");
+            if let Err(e) =
+                ChartDataEvent(ChartData::LineProfileData(line_profile_data)).emit(&self.window)
+            {
+                error!("Error when emitting chart data event for line profile {e}");
             } else {
             }
         }
@@ -37,42 +39,17 @@ impl ChartSubscriber for LineProfileSubscriber {
 
 impl ChartSubscriber for HistogramSubscriber {
     fn update(&self, image: &ImageBuffer<Luma<u16>, Vec<u16>>, roi: Option<Annotation>) {
-        todo!();
-    }
-}
-
-/*
-fn get_points_along_line(x1: isize, y1: isize, x2: isize, y2: isize) -> Vec<(isize, isize)> {
-    let mut points = Vec::new();
-
-    let dx = (x2 - x1).abs();
-    let dy = (y2 - y1).abs();
-
-    let step_x = if x1 < x2 { 1 } else { -1 };
-    let step_y = if y1 < y2 { 1 } else { -1 };
-
-    let mut x = x1;
-    let mut y = y1;
-    let mut err = dx - dy;
-
-    while x != x2 || y != y2 {
-        points.push((x, y));
-
-        let err2 = 2 * err;
-
-        if err2 > -dy {
-            err -= dy;
-            x += step_x;
+        info!("{:?}", roi);
+        let mut histogram = Vec::new();
+        if let Some(roi) = roi {
+            let iter = ImageIterator::new(image, roi);
+            histogram = calculate_histogram(iter, 16383, 20);
+        } else {
+            histogram = calculate_histogram(image.iter(), 16383, 20);
         }
-
-        if err2 < dx {
-            err += dx;
-            y += step_y;
+        if let Err(e) = ChartDataEvent(ChartData::HistogramData(histogram)).emit(&self.window) {
+            error!("Error when emitting chart data event for histogram {e}");
+        } else {
         }
     }
-
-    points.push((x, y));
-
-    points
 }
-*/

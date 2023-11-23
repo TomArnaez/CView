@@ -60,17 +60,18 @@ pub fn median_filter_threaded(
         .expect("Failed to get Mutex inner value")
 }
 
-fn calculate_histogram<'a, I>(vals: I, max_value: u32, num_bins: u32) -> Histogram
+pub fn calculate_histogram<'a, I>(vals: I, max_value: u32, num_bins: u32) -> Histogram
 where
     I: IntoIterator<Item = &'a u16>,
 {
     let bin_size = (max_value + 1) / num_bins;
 
-    vals.into_iter().fold(vec![0; num_bins as usize], |mut histogram, &value| {
-        let bin_index = (value as u32 / bin_size) as usize;
-        histogram[bin_index] += 1;
-        histogram
-    })
+    vals.into_iter()
+        .fold(vec![0; num_bins as usize], |mut histogram, &value| {
+            let bin_index = (value as u32 / bin_size) as usize;
+            histogram[bin_index] += 1;
+            histogram
+        })
 }
 
 fn create_lut(histogram: &Histogram) -> Vec<u32> {
@@ -160,7 +161,6 @@ pub fn invert_colors_grayscale(
     inverted_image
 }
 
-
 #[cfg(test)]
 mod tests {
     use std::time::{Duration, Instant};
@@ -168,13 +168,13 @@ mod tests {
     use super::*;
 
     fn measure_time<F>(f: F) -> Duration
-        where
-            F: FnOnce(),
-        {
-            let start = Instant::now();
-            f();
-            start.elapsed()
-        }
+    where
+        F: FnOnce(),
+    {
+        let start = Instant::now();
+        f();
+        start.elapsed()
+    }
 
     #[test]
     fn test_histogram_time() {
@@ -187,5 +187,4 @@ mod tests {
         });
         println!("Time for find_min_single: {:?}", duration);
     }
-
 }

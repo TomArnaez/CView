@@ -67,6 +67,7 @@ streamCaptureEvent: StreamCaptureEvent,
 captureProgressEvent: CaptureProgressEvent,
 cancelCaptureEvent: CancelCaptureEvent,
 captureManagerEvent: CaptureManagerEvent,
+chartDataEvent: ChartDataEvent,
 imageStateEvent: ImageStateEvent,
 lineProfileEvent: LineProfileEvent,
 histogramEvent: HistogramEvent
@@ -75,6 +76,7 @@ streamCaptureEvent: "plugin:tauri-specta:stream-capture-event",
 captureProgressEvent: "plugin:tauri-specta:capture-progress-event",
 cancelCaptureEvent: "plugin:tauri-specta:cancel-capture-event",
 captureManagerEvent: "plugin:tauri-specta:capture-manager-event",
+chartDataEvent: "plugin:tauri-specta:chart-data-event",
 imageStateEvent: "plugin:tauri-specta:image-state-event",
 lineProfileEvent: "plugin:tauri-specta:line-profile-event",
 histogramEvent: "plugin:tauri-specta:histogram-event"
@@ -94,9 +96,11 @@ export type CaptureProgressEvent = CaptureProgress
 export type CaptureResultData = ({ type: "SmartCaptureData" } & SmartCaptureData) | ({ type: "SignalAccumulationData" } & SignalAccumulationData)
 export type CaptureSetting = { exp_time: number; dds: boolean; full_well: FullWellModesRS; binning_mode: BinningModesRS; roi: number[] | null; corrected: boolean }
 export type Chart = "Histogram" | "LineProfile"
+export type ChartData = { LineProfileData: LineProfileData[] } | { HistogramData: number[] }
+export type ChartDataEvent = ChartData
 export type CorrectionError = { SLError: InternalSLError } | { FileNotFound: string }
 export type FullWellModesRS = { remote_ty: RemoteFullWellModes }
-export type Histogram = { data: { [key in number]: number } }
+export type Histogram = number[]
 export type HistogramEvent = Histogram
 export type ImageHandler = { image_metadata: ImageMetadata; roi: Annotation | null; inverted_colours: boolean }
 export type ImageMetadata = { capture_settings: CaptureSetting | null; date_created: string | null; extra_info: CaptureResultData | null }
@@ -123,7 +127,7 @@ export type StreamCaptureEvent = []
 
          import { invoke as TAURI_INVOKE } from "@tauri-apps/api/primitives";
 import * as TAURI_API_EVENT from "@tauri-apps/api/event";
-import { type Window as __WebviewWindowHandle__ } from "@tauri-apps/api/window";
+import { type Window as __Window__ } from "@tauri-apps/api/window";
 
 type __EventObj__<T> = {
   listen: (
@@ -147,7 +151,7 @@ function __makeEvents__<T extends Record<string, any>>(
   return new Proxy(
     {} as unknown as {
       [K in keyof T]: __EventObj__<T[K]> & {
-        (handle: __WebviewWindowHandle__): __EventObj__<T[K]>;
+        (handle: __Window__): __EventObj__<T[K]>;
       };
     },
     {

@@ -31,7 +31,7 @@ import {
 } from "./bindings";
 import CaptureForm from "./components/CaptureForm";
 import { ImageList } from "./components/ImageList";
-import {  listen } from "@tauri-apps/api/event";
+import { listen } from "@tauri-apps/api/event";
 import { CaptureSettings } from "./components/CaptureSettings";
 import { camelCaseToWords } from "./utils";
 import { Mode } from "./types/draw";
@@ -39,6 +39,7 @@ import { Viewer } from "./components/Viewer/Viewer";
 import { useImageStore } from "./stores/ImageStore";
 import classes from "./css/Button.module.css";
 import { GeneralSettingsForm } from "./components/GeneralSettingsForm";
+import { DarkMapGenerationForm } from "./components/DarkMapGenerationForm";
 
 function App() {
   const [captureProgressModalOpened, setCaptureProgressModalOpened] =
@@ -46,9 +47,10 @@ function App() {
   const [captureSettingsModalOpened, setCaptureSettingsModalOpened] =
     useState(false);
   const [generalSettingsOpened, generalSettingsHandlers] = useDisclosure(false);
+  const [mapGenerationFormOpened, mapGenerationFormHandlers] =
+    useDisclosure(false);
   const {
     setStreaming,
-    imageStacks,
     currentImageIdx,
     currentStackIdx,
     incrementImage,
@@ -57,7 +59,6 @@ function App() {
     updateStacks,
   } = useImageStore((state) => ({
     setStreaming: state.setStreaming,
-    imageStacks: state.imageStacks,
     currentImageIdx: state.currentImageIndex,
     currentStackIdx: state.currentStackIndex,
     incrementImage: state.incrementImage,
@@ -72,7 +73,8 @@ function App() {
       status: "DetectorDisconnected",
       dark_maps: [],
     });
-  const [captureProgress, setCaptureProgress] = useState<CaptureProgress | null>(null);
+  const [captureProgress, setCaptureProgress] =
+    useState<CaptureProgress | null>(null);
   const [drawMode, setDrawMode] = useState<Mode>(Mode.SelectionMode);
   const [live, setLive] = useState<boolean>(false);
 
@@ -103,15 +105,14 @@ function App() {
   useEffect(() => {
     window.addEventListener("keydown", handleUserKeyPress);
 
-    events.lineProfileEvent.listen((e) => {
-    });
+    events.lineProfileEvent.listen((e) => {});
 
     listen("image-state-event", (e: any) => {
       updateStacks(e.payload);
     });
 
     events.captureProgressEvent.listen(async (e) => {
-      setCaptureProgress(e.payload)
+      setCaptureProgress(e.payload);
     });
 
     events.captureManagerEvent.listen(async (e) => {
@@ -173,19 +174,23 @@ function App() {
     await commands.generateDefectMap();
   };
 
-  function isCapturingStatus(status: CaptureManagerStatus): status is { Capturing: AdvancedCapture } {
-    return typeof status === 'object' && 'Capturing' in status;
+  function isCapturingStatus(
+    status: CaptureManagerStatus
+  ): status is { Capturing: AdvancedCapture } {
+    return typeof status === "object" && "Capturing" in status;
   }
-  
 
   return (
     <>
+      <Modal opened={true} onClose={mapGenerationFormHandlers.close} centered>
+        <DarkMapGenerationForm />
+      </Modal>
       <Modal
         opened={generalSettingsOpened}
         onClose={generalSettingsHandlers.close}
         centered
       >
-        <GeneralSettingsForm/>
+        <GeneralSettingsForm />
       </Modal>
       <Modal
         centered
@@ -205,7 +210,6 @@ function App() {
         <CaptureSettings
           darkMapExps={captureManagerInfo.dark_maps}
           startCapture={handleCapture}
-
         />
       </Modal>
       <AppShell
@@ -297,10 +301,13 @@ function App() {
                 <> Run Advanced Capture </>
               )}
               {isCapturingStatus(captureManagerInfo.status) && (
-                <> Running {camelCaseToWords(captureManagerInfo.status.Capturing.type)}
-                <br/>
-                <br/> 
-                {captureProgress?.message} 
+                <>
+                  {" "}
+                  Running{" "}
+                  {camelCaseToWords(captureManagerInfo.status.Capturing.type)}
+                  <br />
+                  <br />
+                  {captureProgress?.message}
                 </>
               )}
             </Button>
@@ -379,10 +386,7 @@ function App() {
             direction="row"
             wrap="nowrap"
           >
-            <Viewer
-              drawMode={drawMode}
-              interaction={false}
-            />
+            <Viewer drawMode={drawMode} interaction={false} />
           </Flex>
         </AppShell.Main>
       </AppShell>

@@ -6,8 +6,8 @@ use super::{
 
 use crate::{
     image::{
-        CaptureResultData, ImageHandler, ImageMetadata, ImageMetadataBuilder, SignalAccumulationData,
-        SmartCaptureData, snr_threaded,
+        snr_threaded, CaptureResultData, ImageHandler, ImageMetadata, ImageMetadataBuilder,
+        SignalAccumulationData, SmartCaptureData,
     },
     wrapper::SLImageRs,
 };
@@ -55,7 +55,7 @@ pub struct MultiCapture {
 #[derive(Clone, Serialize, Deserialize, Debug, Type, PartialEq)]
 pub struct DarkMapCapture {
     pub exp_times: Vec<u32>,
-    pub frames_per_capture: u32
+    pub frames_per_capture: u32,
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, Type, PartialEq)]
@@ -81,7 +81,12 @@ impl AdvCapture for LiveCapture {
         let stream = detector_controller_mutex
             .lock()
             .unwrap()
-            .run_capture_stream(capture_settings.clone(), dark_maps_mutex, defect_map_mutex, stop_signal.clone())
+            .run_capture_stream(
+                capture_settings.clone(),
+                dark_maps_mutex,
+                defect_map_mutex,
+                stop_signal.clone(),
+            )
             .unwrap();
 
         let s = stream
@@ -95,7 +100,7 @@ impl AdvCapture for LiveCapture {
             })
             .boxed();
 
-       s
+        s
     }
 }
 
@@ -110,8 +115,8 @@ impl AdvCapture for SmartCapture {
     ) -> Pin<Box<dyn Stream<Item = CaptureStreamItem> + Send>> {
         info!("Starting Smart Capture");
 
-        let best_snr: Arc<Mutex<Option<ImageBuffer<Luma<u16>, Vec<u16>>>>> =
-            Arc::new(Mutex::new(None));
+        let best_capture: Arc<Mutex<(Option<ImageHandler>, f64)>> =
+            Arc::new(Mutex::new((None, 0.0))); // (Best image buffer, Best SNR)
 
         let streams = self
             .exp_times
@@ -123,18 +128,21 @@ impl AdvCapture for SmartCapture {
 
                 let capture_settings = CaptureSettingBuilder::new(
                     exp_time,
-                    Box::new(SequenceCapture { num_frames: self.frames_per_capture }),
+                    Box::new(SequenceCapture {
+                        num_frames: self.frames_per_capture,
+                    }),
                 )
                 .build();
 
                 let window_size = self.window_size;
+                let best_capture = best_capture.clone();
 
                 detector_controller
                     .run_capture_stream(
                         capture_settings.clone(),
                         dark_maps_mutex.clone(),
                         defect_map_mutex.clone(),
-                        stop_signal.clone()
+                        stop_signal.clone(),
                     )
                     .expect("Failed to run capture stream")
                     .map(move |mut image| {
@@ -148,12 +156,26 @@ impl AdvCapture for SmartCapture {
                                 foreground_rect: snr_results.2.clone(),
                             }))
                             .build();
-                        CaptureStreamItem::Image(ImageHandler::new(image_buffer, image_metadata))
+
+                        let mut best = best_capture.lock().unwrap();
+                        if snr_results.0 > best.1 {
+                            // Compare SNR
+                            *best = (
+                                Some(ImageHandler::new(image_buffer, image_metadata)),
+                                snr_results.0,
+                            );
+                        }
                     })
             })
             .collect::<Vec<_>>();
 
-        stream::iter(streams).flatten().boxed()
+        use async_stream::stream;
+        let guard = best_capture.lock().unwrap();
+        let best_image = guard.0.clone().unwrap();
+        stream! {
+            yield CaptureStreamItem::Image(best_image);
+        }
+        .boxed()
     }
 }
 
@@ -172,7 +194,6 @@ impl AdvCapture for SignalAccumulationCapture {
         let last_image_mutex: Arc<Mutex<Option<ImageBuffer<Luma<u16>, Vec<u16>>>>> =
             Arc::new(Mutex::new(None));
 
-
         let streams = self
             .exp_times
             .iter()
@@ -181,7 +202,9 @@ impl AdvCapture for SignalAccumulationCapture {
 
                 let capture_settings = CaptureSettingBuilder::new(
                     exp_time,
-                    Box::new(SequenceCapture { num_frames: self.frames_per_capture }),
+                    Box::new(SequenceCapture {
+                        num_frames: self.frames_per_capture,
+                    }),
                 )
                 .build();
 
@@ -193,7 +216,7 @@ impl AdvCapture for SignalAccumulationCapture {
                         capture_settings.clone(),
                         dark_maps_mutex.clone(),
                         defect_map_mutex.clone(),
-                        stop_signal.clone()
+                        stop_signal.clone(),
                     )
                     .expect("Failed to run capture stream")
                     .map(move |mut image| {
@@ -208,7 +231,7 @@ impl AdvCapture for SignalAccumulationCapture {
                                 },
                             );
                         }
-                        
+
                         *accumulated_exp_time.lock().unwrap() += exp_time;
 
                         CaptureStreamItem::Image(ImageHandler::new(
@@ -224,7 +247,10 @@ impl AdvCapture for SignalAccumulationCapture {
                         ))
                     })
                     .chain(stream::once(async move {
-                        CaptureStreamItem::Progress(CaptureProgress::new(0, format!("Capturing images for exposure time {exp_time}ms").to_string()))
+                        CaptureStreamItem::Progress(CaptureProgress::new(
+                            0,
+                            format!("Capturing images for exposure time {exp_time}ms").to_string(),
+                        ))
                     }))
             })
             .collect::<Vec<_>>();
@@ -255,7 +281,9 @@ impl AdvCapture for MultiCapture {
 
                 let capture_settings = CaptureSettingBuilder::new(
                     exp_time,
-                    Box::new(SequenceCapture { num_frames: self.frames_per_capture }),
+                    Box::new(SequenceCapture {
+                        num_frames: self.frames_per_capture,
+                    }),
                 )
                 .build();
 
@@ -266,7 +294,7 @@ impl AdvCapture for MultiCapture {
                         capture_settings.clone(),
                         dark_maps_mutex.clone(),
                         defect_map_mutex.clone(),
-                        stop_signal.clone()
+                        stop_signal.clone(),
                     )
                     .expect("Failed to run capture stream")
                     .take_while(move |_| {
@@ -284,7 +312,10 @@ impl AdvCapture for MultiCapture {
                         ))
                     })
                     .chain(stream::once(async move {
-                        CaptureStreamItem::Progress(CaptureProgress::new(0, format!("Capturing images for exposure time {exp_time}ms").to_string()))
+                        CaptureStreamItem::Progress(CaptureProgress::new(
+                            0,
+                            format!("Capturing images for exposure time {exp_time}ms").to_string(),
+                        ))
                     }))
             })
             .collect::<Vec<_>>();

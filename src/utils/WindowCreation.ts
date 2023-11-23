@@ -1,7 +1,7 @@
-import { ChartType, commands } from "../bindings"
+import { Chart, commands } from "../bindings"
 import { Window } from "@tauri-apps/api/window";
 
-export const createChartWindow = (chart: ChartType, imageIdx: number, stackIdx: number): Window => {
+export const createChartWindow = (chart: Chart, imageIdx: number, stackIdx: number): Window => {
     const label = chart + "-Image" + imageIdx + "-Stack" + stackIdx;
  
     const chartWindow = new Window(label, {

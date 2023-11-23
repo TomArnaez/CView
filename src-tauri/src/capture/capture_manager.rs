@@ -17,18 +17,16 @@ use regex::Regex;
 use tauri::{AppHandle, Manager, Runtime};
 use tauri_specta::Event;
 
-use crate::{
-    capture::corrections::run_defect_map_gen,
-    wrapper::*,
-};
+use crate::{capture::corrections::run_defect_map_gen, wrapper::*};
 
 use super::{
+    advanced_capture::LiveCapture,
     capture::{CaptureError, CaptureSettingBuilder, SequenceCapture},
     detector::{DetectorController, DetectorStatus},
     types::{
         AdvCapture, AdvancedCapture, CaptureManagerEvent, CaptureManagerEventPayload,
         CaptureManagerInfo, CaptureManagerStatus, CaptureStreamItem,
-    }, advanced_capture::LiveCapture,
+    },
 };
 
 pub struct CaptureManager {
@@ -87,7 +85,10 @@ impl CaptureManager {
         let info = self.info.clone();
         let stop_signal_clone: Arc<AtomicBool> = self.stop_signal.clone();
 
-        info.lock().unwrap().status = CaptureManagerStatus::Capturing(AdvancedCapture::LiveCapture(LiveCapture { exp_time: 100}));;
+        info.lock().unwrap().status =
+            CaptureManagerStatus::Capturing(AdvancedCapture::LiveCapture(LiveCapture {
+                exp_time: 100,
+            }));
 
         tauri::async_runtime::spawn(async move {
             stream::iter(exp_times)
@@ -162,10 +163,16 @@ impl CaptureManager {
         let info = self.info.clone();
 
         let stop_signal_clone: Arc<AtomicBool> = self.stop_signal.clone();
-        info.lock().unwrap().status = CaptureManagerStatus::Capturing(AdvancedCapture::LiveCapture(LiveCapture { exp_time: 100}));
+        info.lock().unwrap().status =
+            CaptureManagerStatus::Capturing(AdvancedCapture::LiveCapture(LiveCapture {
+                exp_time: 100,
+            }));
 
         tauri::async_runtime::spawn(async move {
-            info.lock().unwrap().status = CaptureManagerStatus::Capturing(AdvancedCapture::LiveCapture(LiveCapture { exp_time: 100}));
+            info.lock().unwrap().status =
+                CaptureManagerStatus::Capturing(AdvancedCapture::LiveCapture(LiveCapture {
+                    exp_time: 100,
+                }));
             stream::iter(dark_exp_times)
                 .flat_map(|exp_time| {
                     let full_well_modes = [
@@ -289,14 +296,15 @@ impl CaptureManager {
                 .keys()
                 .cloned()
                 .collect::<Vec<u32>>();
-            
+
             exposure_times.sort();
-            
+
             match CaptureManagerEvent(CaptureManagerEventPayload {
                 dark_maps: exposure_times,
                 status: info.status.clone(),
             })
-            .emit_all(&app) {
+            .emit_all(&app)
+            {
                 Err(e) => error!("Error when emitting capture manager event {e}"),
                 _ => {}
             }

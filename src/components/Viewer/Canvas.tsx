@@ -16,10 +16,10 @@ import { useContextMenu } from "mantine-contextmenu";
 import classes from "../../css/master.module.css";
 import { createChartWindow } from "../../utils/WindowCreation";
 import { renderCaptureData } from "./RenderCaptureData";
+import { useImageStore } from "../../stores/ImageStore";
 
 interface CanvasProps {
   mode: Mode;
-  imageIdx: number;
   canvasImageSource: HTMLCanvasElement | null;
   metadata: ImageMetadata | null;
 
@@ -33,7 +33,6 @@ interface CanvasProps {
 
 const Canvas = ({
   mode,
-  imageIdx,
   canvasImageSource,
   onCursorMove,
   onRoiChange,
@@ -57,22 +56,29 @@ const Canvas = ({
   const [stageX, setStageX] = useState<number>(0.0);
   const [stageY, setStageY] = useState<number>(0.0);
 
+  const { currentImageIdx, currentStackIdx } = useImageStore((state) => ({
+    currentImageIdx: state.currentImageIndex,
+    currentStackIdx: state.currentStackIndex,
+  }));
+
   const handleKeyPress = useCallback(
     async (event: KeyboardEvent) => {
       switch (event.key) {
         case "k": {
           if (newAnnotation != null) {
-            createChartWindow("LineProfile", imageIdx, 0);
+            createChartWindow("LineProfile", currentImageIdx, currentStackIdx);
           }
           break;
         }
         case "h": {
-          createChartWindow("Histogram", imageIdx, 0);
+          if (newAnnotation != null) {
+            createChartWindow("Histogram", currentImageIdx, currentStackIdx);
+          }
           break;
         }
       }
     },
-    [newAnnotation, imageIdx]
+    [newAnnotation, currentImageIdx, currentStackIdx]
   );
 
   useEffect(() => {
@@ -145,19 +151,18 @@ const Canvas = ({
       const newScale =
         e.evt.deltaY < 0 ? oldScale * scaleBy : oldScale / scaleBy;
 
-
       const stagePointerPosition = stage.getPointerPosition();
       setZoomScale(newScale);
 
       if (stagePointerPosition) {
-      const mousePointTo = {
-        x: stagePointerPosition.x / oldScale - stage.x() / oldScale,
-        y: stagePointerPosition.y / oldScale - stage.y() / oldScale,
-      };
-      const newX =
-        (stagePointerPosition.x / newScale - mousePointTo.x) * newScale;
-      const newY =
-        (stagePointerPosition.y / newScale - mousePointTo.y) * newScale;
+        const mousePointTo = {
+          x: stagePointerPosition.x / oldScale - stage.x() / oldScale,
+          y: stagePointerPosition.y / oldScale - stage.y() / oldScale,
+        };
+        const newX =
+          (stagePointerPosition.x / newScale - mousePointTo.x) * newScale;
+        const newY =
+          (stagePointerPosition.y / newScale - mousePointTo.y) * newScale;
         setStageX(newX);
         setStageY(newY);
       }

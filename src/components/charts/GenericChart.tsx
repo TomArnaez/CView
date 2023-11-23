@@ -7,6 +7,7 @@ interface ChartProps<T> {
 }
 
 const GenericChart = <T,>({ data, renderChart }: ChartProps<T>) => {
+  console.log(renderChart);
   return (
     <ResponsiveContainer width="90%" height="90%">
       {renderChart(data)}

@@ -1,5 +1,5 @@
 use super::types::{Annotation, DataExtractor, Line, Rect};
-use super::{CaptureResultData, ImageMetadata, get_points_along_line, calculate_mean_and_std_iter};
+use super::{calculate_mean_and_std_iter, get_points_along_line, CaptureResultData, ImageMetadata};
 use crate::capture::capture::CaptureSetting;
 use crate::capture::types::AdvancedCapture;
 use crate::charts::charts::ChartSubscriber;
@@ -310,13 +310,7 @@ impl ImageHandler {
     }
 
     pub fn get_mean(&self, roi: Option<Annotation>) -> (f64, f64) {
-        if let Some(roi) = roi {
-            let iter = ImageIterator::new(&self.image, roi);
-            calculate_mean_and_std_iter(&iter)
-        }
-        else {
-            calculate_mean_and_std_iter(&self.image.iter())
-        }
+        todo!();
     }
 
     pub fn create_rgba_image(&self) -> Vec<u8> {
@@ -568,6 +562,11 @@ impl Iterator for RectIterator {
     type Item = (u32, u32);
 
     fn next(&mut self) -> Option<Self::Item> {
+        // TODO: Maybe this can be made unnecessary
+        if self.rect.width == 0 || self.rect.height == 0 {
+            return None;
+        }
+
         if self.current_y < self.rect.pos.y + self.rect.height {
             let current_point = (self.current_x, self.current_y);
             self.current_x += 1;

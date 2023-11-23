@@ -10,8 +10,17 @@ pub enum Chart {
     LineProfile,
 }
 
+#[derive(Clone, Serialize, Type)]
+pub enum ChartData {
+    LineProfileData(LineProfile),
+    HistogramData(Vec<u32>),
+}
+
+#[derive(Clone, Serialize, Type, Event)]
+pub struct ChartDataEvent(pub ChartData);
+
 #[derive(Clone, Serialize, Type, Event)]
 pub struct LineProfileEvent(pub LineProfile);
 
 #[derive(Clone, Serialize, Type, Event)]
-pub struct HistogramEvent(pub Histogram);
+pub struct HistogramEvent(pub Vec<u32>);
