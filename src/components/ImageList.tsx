@@ -9,7 +9,7 @@ import { useContextMenu } from "mantine-contextmenu";
 import { useImageStore } from "../stores/ImageStore";
 
 export const ImageList = (): JSX.Element => {
-  const thumbnailSize = 32;
+  const thumbnailSize = 300;
 
   const [thumbnails, setThumbnails] = useState<HTMLCanvasElement[]>([]);
   const { imageStacks, currentStackIdx, setStack } = useImageStore((state) => ({
@@ -30,24 +30,24 @@ export const ImageList = (): JSX.Element => {
   }, [imageStacks]);
 
   const getThumbnail = async (stackIdx: number): Promise<HTMLCanvasElement> => {
-    const data: Uint16Array = new Uint16Array(
-      await invoke("get_image_binary", {
+    const image_data: Uint8Array = new Uint8Array(
+      await invoke("get_image_binary_rgba", {
         imageIdx: 0,
         stackIdx,
-        resize: thumbnailSize,
+        resizeSize: thumbnailSize,
       })
     );
 
     const canvas = document.createElement("canvas");
-    const rgba_data = convert14BArrayToRGBA(data, thumbnailSize, thumbnailSize);
     const ctx = canvas.getContext("2d");
     if (ctx) {
-      const imageData = ctx.createImageData(canvas.width, canvas.height);
-      imageData.data.set(rgba_data);
+      const imageData = ctx.createImageData(thumbnailSize, thumbnailSize);
+      imageData.data.set(image_data);
       ctx.putImageData(imageData, 0, 0);
     }
     return canvas;
   };
+  
   return (
     <ScrollArea type="auto">
       {imageStacks.map((stack, stackIdx: number) => {

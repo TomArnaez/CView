@@ -1,39 +1,50 @@
 import { useEffect, useState } from "react";
-import GenericChart from "./GenericChart";
-import { events } from "../../bindings";
+import { Chart, ChartData, events } from "../../bindings";
 import ReactDOM from "react-dom/client";
 import renderLineProfileChart from "./LineProfileChart";
 import { Window } from "@tauri-apps/api/window";
 import renderHistogram from "./HistogramChart";
+import { ResponsiveContainer } from "recharts";
 
 const ChartWindow = () => {
   const [chartData, setChartData] = useState([]);
-  const [renderChartFunc, setRenderChartFunc] = useState<any>();
+  const [chartType, setChartType] = useState<Chart>();
 
   useEffect(() => {
     console.log("Chart Window setup for window", Window.getCurrent().label);
     events.chartDataEvent.listen((e) => {
       const data = e.payload;
-      if ("LineProfileData" in data) {
-        setChartData(data.LineProfileData);
-        setRenderChartFunc(renderLineProfileChart);
-        console.log(renderLineProfileChart);
-      } else if ("HistogramData" in chartData) {
-        setChartData(data.HistogramData);
-        setRenderChartFunc(renderHistogram);
-        console.log(data.HistogramData);
-      }
-    });
-    events.lineProfileEvent.listen((e) => {
-      if (Window.getCurrent().label === e.windowLabel) {
-        setChartData(e.payload);
+      const window = e.windowLabel;
+      if (window == Window.getCurrent().label) {
+        if ("LineProfileData" in data) {
+          setChartData(data.LineProfileData);
+          setChartType("LineProfile")
+        } else if ("HistogramData" in data) {
+          console.log("histogram");
+          setChartData(data.HistogramData);
+          setChartType("Histogram");
+        }
       }
     });
   }, []);
 
+  const getChartData = (chart: Chart, chartData: ChartData): JSX.Element => {
+    console.log("Hi", chartType)
+    switch (chart) { 
+      case "LineProfile": 
+        return renderLineProfileChart(chartData)
+      case "Histogram":
+        return renderHistogram(chartData)
+      default:
+        return <></>
+    }
+  }
+
   return (
     <div style={{ width: "100vw", height: "100vh" }}>
-      <GenericChart data={chartData} renderChart={renderLineProfileChart} />
+    <ResponsiveContainer width="90%" height="90%">
+      {getChartData(chartType, chartData)}
+    </ResponsiveContainer>    
     </div>
   );
 };

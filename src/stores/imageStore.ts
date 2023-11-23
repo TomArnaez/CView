@@ -2,7 +2,6 @@ import { SetState, create } from "zustand";
 import { ImageMetadata, ImageStack, events } from "../bindings";
 import { Image } from "../types/imagestate";
 import { invoke } from "@tauri-apps/api/primitives";
-import { convert14BArrayToRGBA } from "../utils";
 import { UnlistenFn } from "@tauri-apps/api/event";
 
 interface ImageState {
@@ -12,7 +11,7 @@ interface ImageState {
   currentImage: Image | null;
   streaming: boolean;
 
-  _unlistenStream: UnlistenFn | null,
+  _unlistenStream: UnlistenFn | null;
 
   incrementImage: (by: number) => void;
   incrementStack: (by: number) => void;
@@ -30,18 +29,22 @@ interface ImageState {
 const isValidIndex = (index: number, length: number) =>
   index >= 0 && index < length;
 
-const listenStreamEvent = async (set: SetState<ImageState>): Promise<UnlistenFn> => {
+const listenStreamEvent = async (
+  set: SetState<ImageState>
+): Promise<UnlistenFn> => {
   return events.streamCaptureEvent.listen(async () => {
-    const data = new Uint16Array(await invoke("read_stream_buffer", {}));
+    const data = new Uint8Array(
+      await invoke("read_stream_buffer", { saturatedPixelThreshold: 16000 })
+    );
     if (data.length != 0) {
       const width = 1031;
       const height = 1536;
       const newImage: Image = {
         width: width,
         height: height,
-        data: convert14BArrayToRGBA(data, width, height, null)
+        data: data,
       };
-      set({ currentImage: newImage})
+      set({ currentImage: newImage });
     }
   });
 };
@@ -49,13 +52,14 @@ const listenStreamEvent = async (set: SetState<ImageState>): Promise<UnlistenFn>
 const setCurrentImageAsync = async (
   imageIdx: number,
   stackIdx: number,
-  set: SetState<ImageState>,
+  set: SetState<ImageState>
 ) => {
-  const data = new Uint16Array(
-    await invoke("get_image_binary", {
+  const data = new Uint8Array(
+    await invoke("get_image_binary_rgba", {
       imageIdx,
       stackIdx,
       resize: null,
+      saturatedPixelThreshold: 16000,
     })
   );
   const width = 1031;
@@ -63,9 +67,10 @@ const setCurrentImageAsync = async (
   const newImage: Image = {
     width: width,
     height: height,
-    data: convert14BArrayToRGBA(data, width, height, null)
+    data: data,
   };
-  set({ currentImage: newImage});
+  console.log(newImage.data);
+  set({ currentImage: newImage });
 };
 
 export const useImageStore = create<ImageState>()((set, get) => ({
@@ -83,24 +88,31 @@ export const useImageStore = create<ImageState>()((set, get) => ({
 
   getCurrentMetaData: () => {
     const state = get();
-    const { streaming, currentStackIndex, currentImageIndex, imageStacks } = state;
-  
-    if (streaming || currentStackIndex >= imageStacks.length || currentImageIndex >= imageStacks[currentStackIndex].image_handlers.length) {
+    const { streaming, currentStackIndex, currentImageIndex, imageStacks } =
+      state;
+
+    if (
+      streaming ||
+      currentStackIndex >= imageStacks.length ||
+      currentImageIndex >= imageStacks[currentStackIndex].image_handlers.length
+    ) {
       return null;
     }
 
-    return imageStacks[currentStackIndex].image_handlers[currentImageIndex].image_metadata;
+    return imageStacks[currentStackIndex].image_handlers[currentImageIndex]
+      .image_metadata;
   },
-  setStreaming: (by: boolean) => set(async (state) => {
-    if (by === true && state._unlistenStream === null) {
-      const unlistenFn = await listenStreamEvent(set);
-      return { _unlistenStream: unlistenFn, streaming: by };
-    } else if (by === false && state._unlistenStream !== null) {
-      await state._unlistenStream();
-      return { _unlistenStream: null, streaming: by };
-    }
-    return { streaming: by };
-  }),
+  setStreaming: (by: boolean) =>
+    set(async (state) => {
+      if (by === true && state._unlistenStream === null) {
+        const unlistenFn = await listenStreamEvent(set);
+        return { _unlistenStream: unlistenFn, streaming: by };
+      } else if (by === false && state._unlistenStream !== null) {
+        await state._unlistenStream();
+        return { _unlistenStream: null, streaming: by };
+      }
+      return { streaming: by };
+    }),
   incrementImage: (by) =>
     set((state) => {
       const newIndex = state.currentImageIndex + by;
@@ -161,9 +173,8 @@ export const useImageStore = create<ImageState>()((set, get) => ({
     }),
   setStack: (idx) =>
     set(() => {
-      if (!get().streaming)
-        setCurrentImageAsync(0, idx, set);
-      return { currentStackIndex: idx}
+      if (!get().streaming) setCurrentImageAsync(0, idx, set);
+      return { currentStackIndex: idx };
     }),
   setImage: (idx) => set(() => ({ currentImageIndex: idx })),
   updateStacks: (newStacks) => {

@@ -3,9 +3,9 @@ use log::{error, info};
 use tauri::{AppHandle, Window};
 use tauri_specta::Event;
 
-use crate::image::{
-    calculate_histogram, types::DataExtractor, Annotation, ImageIterator, LineProfile,
-};
+use crate::{image::{
+ types::DataExtractor, Annotation, ImageIterator, LineProfile, calculate_histogram_min_max,
+}, charts::types::HistogramBin};
 
 use super::types::{ChartData, ChartDataEvent};
 
@@ -39,17 +39,14 @@ impl ChartSubscriber for LineProfileSubscriber {
 
 impl ChartSubscriber for HistogramSubscriber {
     fn update(&self, image: &ImageBuffer<Luma<u16>, Vec<u16>>, roi: Option<Annotation>) {
-        info!("{:?}", roi);
-        let mut histogram = Vec::new();
-        if let Some(roi) = roi {
+        let histogram = roi.map(|roi| {
             let iter = ImageIterator::new(image, roi);
-            histogram = calculate_histogram(iter, 16383, 20);
-        } else {
-            histogram = calculate_histogram(image.iter(), 16383, 20);
-        }
+            calculate_histogram_min_max(iter.collect(), 256)
+        })
+        .unwrap_or_else(|| calculate_histogram_min_max(image.iter().collect(), 256));
+
         if let Err(e) = ChartDataEvent(ChartData::HistogramData(histogram)).emit(&self.window) {
-            error!("Error when emitting chart data event for histogram {e}");
-        } else {
+            error!("Error when emitting chart data event for histogram: {e}");
         }
     }
 }

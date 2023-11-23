@@ -42,14 +42,20 @@ use tauri_plugin_log::{fern::colors::ColoredLevelConfig, Target, TargetKind};
 
 pub struct StreamBuffer {
     pub q: ConcurrentQueue<ImageHandler>,
+    size: usize,
 }
 
 impl StreamBuffer {
     fn new(size: usize) -> StreamBuffer {
         let buffer = StreamBuffer {
             q: ConcurrentQueue::<ImageHandler>::bounded(size),
+            size
         };
         buffer
+    }
+
+    fn clear(&mut self) {
+        self.q = ConcurrentQueue::<ImageHandler>::bounded(self.size);
     }
 }
 
@@ -111,9 +117,9 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            commands::image::get_image_binary,
+            commands::image::get_image_binary_rgba,
             capture::commands::run_capture,
-            capture::commands::read_stream_buffer
+            capture::commands::read_stream_buffer,
         ])
         /* Old way of streaming images to fronrtend
         .register_asynchronous_uri_scheme_protocol("stream", move |app, request, responder| {

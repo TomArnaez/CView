@@ -1,7 +1,7 @@
 use crate::image::Annotation;
 use crate::image::ImageService;
+use image::DynamicImage;
 use image::EncodableLayout;
-use image::codecs::png::FilterType;
 use image::imageops;
 use log::info;
 use std::sync::Mutex;
@@ -10,23 +10,20 @@ use tauri::{AppHandle, Manager, State};
 
 #[tauri::command(async)]
 #[specta::specta]
-pub fn get_image_binary(
+pub fn get_image_binary_rgba(
     image_service_mutex: State<'_, Mutex<ImageService>>,
     stack_idx: u32,
     image_idx: u32,
+    saturated_pixel_threshold: Option<u32>,
     resize_size: Option<u32>,
 ) -> Response {
     let image_service = image_service_mutex.lock().unwrap();
 
     if let Some(image_handler) = image_service.get_handler(stack_idx as usize, image_idx as usize) {
-        let mut image: image::ImageBuffer<image::Luma<u16>, Vec<u16>> = image_handler.get_image();
-        if let Some(new_size) = resize_size {
-            image = imageops::resize(&image, new_size, new_size, imageops::FilterType::Nearest);
-        }
-        Response::new(image.as_bytes().to_owned())
-    } else {
-        Response::new(vec![])
+        return Response::new(image_handler.get_rgba_image(saturated_pixel_threshold));
     }
+
+    Response::new(vec![])
 }
 
 #[tauri::command(async)]

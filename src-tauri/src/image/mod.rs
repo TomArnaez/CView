@@ -3,7 +3,6 @@ pub mod types;
 pub mod metadata;
 pub mod operations;
 pub mod statistics;
-pub mod commands;
 
 pub use image::{
     ImageHandler, ImageIterator, ImageService, ImageStack, LineProfile

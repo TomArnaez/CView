@@ -7,7 +7,7 @@ import {
   Rect as KonvaRect,
   Line as KonvaLine,
 } from "react-konva";
-import { FaChartBar } from "react-icons/fa";
+import { FaChartBar, FaChartLine, FaRegEye } from "react-icons/fa";
 import Konva from "konva";
 import { KonvaEventObject } from "konva/lib/Node";
 import { Annotation, ImageMetadata, Point } from "../../bindings";
@@ -61,24 +61,32 @@ const Canvas = ({
     currentStackIdx: state.currentStackIndex,
   }));
 
+  const handleShowHistogramChart = useCallback(() => {
+    if (canvasImageSource != null) {
+      createChartWindow("Histogram", currentImageIdx, currentStackIdx);
+    }
+  }, [canvasImageSource, currentImageIdx, currentStackIdx]); 
+
+  const handleShowLineProfileChart = useCallback(() => {
+    if (canvasImageSource != null) {
+      createChartWindow("LineProfile", currentImageIdx, currentStackIdx);
+    }
+  }, [canvasImageSource, currentImageIdx, currentStackIdx]);
+
   const handleKeyPress = useCallback(
     async (event: KeyboardEvent) => {
       switch (event.key) {
         case "k": {
-          if (newAnnotation != null) {
-            createChartWindow("LineProfile", currentImageIdx, currentStackIdx);
-          }
+          handleShowLineProfileChart();
           break;
         }
         case "h": {
-          if (newAnnotation != null) {
-            createChartWindow("Histogram", currentImageIdx, currentStackIdx);
-          }
+          handleShowHistogramChart();
           break;
         }
       }
     },
-    [newAnnotation, currentImageIdx, currentStackIdx]
+    [handleShowLineProfileChart, handleShowHistogramChart]
   );
 
   useEffect(() => {
@@ -182,12 +190,6 @@ const Canvas = ({
 
   const handleMouseUp = (): void => {
     setDrawingAnnotation(false);
-    /*
-    if (newAnnotation != null) {
-      setAnnotations([...annotations, newAnnotation]);
-      setNewAnnotation(undefined);
-    }
-    */
   };
 
   const handleSceneMouseDown = (e: KonvaEventObject<MouseEvent>): void => {
@@ -293,15 +295,27 @@ const Canvas = ({
         {
           key: "Invert Colours",
           title: "Invert Colours",
-          icon: <FaChartBar size={16} />,
+          icon: <FaRegEye size={16} />,
           onClick: onInvertColours,
         },
         {
-          key: "Apply Histogram Equilization",
-          title: "Apply Histogram Equilization",
+          key: "Apply Histogram Equalization",
+          title: "Apply Histogram Equalization",
           icon: <FaChartBar size={16} />,
           onClick: onHistogramEquilization,
         },
+        {
+          key: "Show Histogram Chart",
+          title: "Show Histogram Chart",
+          icon: <FaChartBar size={16} />,
+          onClick: handleShowHistogramChart,
+        },
+        {
+          key: "Show Line Profile Chart",
+          title: "Show Line Profile Chart",
+          icon: <FaChartLine size={16} />,
+          onClick: handleShowLineProfileChart,
+        }
       ])}
       style={{ position: "relative" }}
     >

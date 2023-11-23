@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 use tauri_specta::Event;
 
-use crate::{events::Histogram, image::LineProfile};
+use crate::{image::{LineProfile}};
 
 #[derive(Serialize, Deserialize, Type)]
 pub enum Chart {
@@ -10,10 +10,16 @@ pub enum Chart {
     LineProfile,
 }
 
+#[derive(Serialize, Type, Clone, Debug)]
+pub struct HistogramBin {
+    pub range: u32,
+    pub count: u32
+}
+
 #[derive(Clone, Serialize, Type)]
 pub enum ChartData {
     LineProfileData(LineProfile),
-    HistogramData(Vec<u32>),
+    HistogramData(Vec<HistogramBin>),
 }
 
 #[derive(Clone, Serialize, Type, Event)]

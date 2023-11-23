@@ -18,6 +18,9 @@ import {
   FaRegFileImage,
   FaSave,
   FaLess,
+  FaRegSquare,
+  FaArrowLeft,
+  FaArrowRight,
 } from "react-icons/fa";
 import { useState, useEffect, useCallback } from "react";
 import {
@@ -40,6 +43,8 @@ import { useImageStore } from "./stores/ImageStore";
 import classes from "./css/Button.module.css";
 import { GeneralSettingsForm } from "./components/GeneralSettingsForm";
 import { DarkMapGenerationForm } from "./components/DarkMapGenerationForm";
+
+console.log(classes)
 
 function App() {
   const [captureProgressModalOpened, setCaptureProgressModalOpened] =
@@ -148,6 +153,7 @@ function App() {
 
   const handleStopLive = async () => {
     setStreaming(false);
+    setCaptureProgress(null);
     await commands.stopCapture();
   };
 
@@ -182,7 +188,7 @@ function App() {
 
   return (
     <>
-      <Modal opened={true} onClose={mapGenerationFormHandlers.close} centered>
+      <Modal opened={false} onClose={mapGenerationFormHandlers.close} centered>
         <DarkMapGenerationForm />
       </Modal>
       <Modal
@@ -302,8 +308,7 @@ function App() {
               )}
               {isCapturingStatus(captureManagerInfo.status) && (
                 <>
-                  {" "}
-                  Running{" "}
+                  Running
                   {camelCaseToWords(captureManagerInfo.status.Capturing.type)}
                   <br />
                   <br />
@@ -333,7 +338,7 @@ function App() {
                 },
                 {
                   value: Mode.RectangleMode,
-                  label: <FaBorderStyle />,
+                  label: <FaRegSquare />,
                 },
                 {
                   value: Mode.LineMode,
@@ -352,9 +357,8 @@ function App() {
             }}
           >
             <Button
-              style={{
-                height: "100%",
-              }}
+              className={classes.button}
+
               variant="filled"
               color={live ? "red" : "blue"}
               disabled={
@@ -386,7 +390,13 @@ function App() {
             direction="row"
             wrap="nowrap"
           >
+            <ActionIcon onClick={() => decrementImage(1)} variant="transparent">
+              <FaArrowLeft />
+            </ActionIcon>
             <Viewer drawMode={drawMode} interaction={false} />
+            <ActionIcon onClick={() => incrementImage(1)} variant="transparent">
+              <FaArrowRight />
+            </ActionIcon>
           </Flex>
         </AppShell.Main>
       </AppShell>

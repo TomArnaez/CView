@@ -1,7 +1,3 @@
 .button {
-    background-color: orange;
-
-    &[data-collapsed] {
-        background-color: red;
-    }
+    background-color: green;
 }

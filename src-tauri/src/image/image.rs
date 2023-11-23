@@ -1,12 +1,11 @@
 use super::types::{Annotation, DataExtractor, Line, Rect};
-use super::{calculate_mean_and_std_iter, get_points_along_line, CaptureResultData, ImageMetadata};
-use crate::capture::capture::CaptureSetting;
+use super::{get_points_along_line, ImageMetadata};
 use crate::capture::types::AdvancedCapture;
 use crate::charts::charts::ChartSubscriber;
 use crate::image::HistogramEquilisation;
 use crate::utils::serialize_dt;
 use chrono::prelude::{DateTime, Utc};
-use image::ImageEncoder;
+use image::{ImageEncoder};
 use image::{ImageBuffer, Luma};
 use image_lib::{imageops, EncodableLayout};
 use log::info;
@@ -27,7 +26,7 @@ const RANGE_SIZE: usize = 16384;
 #[derive(Serialize, Type, Clone, Debug)]
 pub struct LineProfileData {
     idx: u32,
-    value: u32,
+    value: f64,
 }
 
 pub type LineProfile = Vec<LineProfileData>;
@@ -200,8 +199,10 @@ impl ImageHandler {
     }
 
     pub fn subscribe(&mut self, subscriber: Box<dyn ChartSubscriber + Send>) {
-        subscriber.update(&self.image, self.roi.clone());
         self.subscribers.push(subscriber);
+        if let Some(subscriber) = self.subscribers.last() {
+            subscriber.update(&self.image, self.roi.clone());
+        }
     }
 
     pub fn unsubscribe(&mut self, subscriber_index: usize) {
@@ -283,6 +284,51 @@ impl ImageHandler {
         lut
     }
 
+    pub fn get_rgba_image(&self, saturated_pixel_threshold: Option<u32>) -> Vec<u8> {
+        println!("{:?}", saturated_pixel_threshold);
+        let mut thresholded_image = self.image.clone();
+
+        if let Some(lut_array) = &self.lut {
+            let iter = thresholded_image.iter_mut();
+
+            iter.for_each(|p| {
+                let lut_val = lut_array[*p as usize];
+                *p = lut_val as u16;
+            });
+        };
+
+        let mut data: Vec<u8> = Vec::new();
+
+        for (new_pixel, original) in thresholded_image.iter().zip(self.image.iter()) {
+            let mut scaled_value = ((*new_pixel as f32 / 16383.0) * 255.0) as u8;
+
+            if (self.inverted_colours) {
+                scaled_value = 255 - scaled_value;
+            }
+            if let Some(threshold) = saturated_pixel_threshold {
+                if *original > threshold as u16 {
+                    data.push(255); // Red
+                    data.push(0); // Green
+                    data.push(0); // Blue
+                    data.push(255 as u8); // Alpha
+                }
+                else {
+                    data.push(scaled_value); // Red
+                    data.push(scaled_value); // Green
+                    data.push(scaled_value); // Blue
+                    data.push(255 as u8); // Alpha
+                }
+            }
+            else {
+                data.push(scaled_value); // Red
+                data.push(scaled_value); // Green
+                data.push(scaled_value); // Blue
+                data.push(255 as u8); // Alpha
+            }
+        }
+
+        data
+    }
     pub fn get_image(&self) -> ImageBuffer<Luma<u16>, Vec<u16>> {
         let mut thresholded_image = self.image.clone();
 
@@ -460,7 +506,7 @@ impl DataExtractor for Rect {
                 column_sum += img.get_pixel(x, y)[0] as u32;
             }
 
-            let column_average = column_sum / self.height;
+            let column_average = column_sum as f64 / self.height as f64;
             line_profile.push(LineProfileData {
                 idx: x,
                 value: column_average,
@@ -533,7 +579,7 @@ impl DataExtractor for Line {
             } else {
                 line_profile.push(LineProfileData {
                     idx: prev_point.0 as u32,
-                    value: (column_sum as u32 / column_count as u32) as u32,
+                    value: column_sum as f64 / column_count as f64,
                 });
                 prev_point = point;
                 column_sum = intensity as u64;
@@ -543,7 +589,7 @@ impl DataExtractor for Line {
 
         line_profile.push(LineProfileData {
             idx: prev_point.0 as u32,
-            value: (column_sum as u32 / column_count as u32) as u32,
+            value: column_sum as f64 / column_count as f64,
         });
 
         line_profile

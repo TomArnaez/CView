@@ -6,8 +6,10 @@ use crate::image::ImageStack;
 use crate::ImageService;
 use crate::StreamBuffer;
 use chrono::Utc;
+use concurrent_queue::ConcurrentQueue;
 use futures_util::{pin_mut, StreamExt};
 use image::EncodableLayout;
+use log::debug;
 use log::error;
 use log::info;
 use tauri::Manager;
@@ -31,8 +33,6 @@ pub async fn run_capture(
     capture: AdvancedCapture,
     save_capture: bool,
 ) -> Result<(), CaptureError> {
-    info!("Called Run Capture with {:?}", capture);
-
     let stream = capture_manager_mutex
         .lock()
         .unwrap()
@@ -96,21 +96,21 @@ pub async fn run_capture(
 
 #[tauri::command(async)]
 #[specta::specta]
-pub fn stop_capture(capture_manager_mutex: State<Mutex<CaptureManager>>) {
+pub fn stop_capture(capture_manager_mutex: State<Mutex<CaptureManager>>, stream_buffer_mutex: State<Mutex<StreamBuffer>>) {
     info!("Stopping capture");
     let capture_manager = capture_manager_mutex.lock().unwrap();
     capture_manager.stop_capture();
+    info!("Clearing stream buffer");
+    stream_buffer_mutex.lock().unwrap().clear();
 }
 
 #[tauri::command(async)]
-pub fn read_stream_buffer(stream_buffer_mutex: State<Mutex<StreamBuffer>>) -> Response {
-    info!("Reading stream buffer");
+pub fn read_stream_buffer(stream_buffer_mutex: State<Mutex<StreamBuffer>>, saturated_pixel_threshold: Option<u32>) -> Response {
+    debug!("Reading stream buffer");
     let stream_buffer = stream_buffer_mutex.lock().unwrap();
-
     if let Ok(image_handler) = stream_buffer.q.pop() {
-        return Response::new(image_handler.get_image().as_bytes().to_owned());
+        return Response::new(image_handler.get_rgba_image(saturated_pixel_threshold));
     }
-
     Response::new(vec![])
 }
 

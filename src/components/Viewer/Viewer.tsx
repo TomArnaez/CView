@@ -40,7 +40,6 @@ export const Viewer = ({
         ctx.putImageData(imageData, 0, 0);
         setImageCanvas(canvas);
         setImageMetadata(getCurrentMetadata());
-        console.log(getCurrentMetadata());
       }
     }
   }, [currentImage, getCurrentMetadata, setImageCanvas, setImageMetadata])
@@ -91,7 +90,6 @@ export const Viewer = ({
         <Canvas
           mode={drawMode}
           canvasImageSource={imageCanvas}
-          imageIdx={currentImageIdx}
           onRoiChange={handleRoiChange}
           onRotate={handleRotate}
           onCursorMove={handleCursorMove}

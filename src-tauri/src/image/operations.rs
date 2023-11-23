@@ -4,7 +4,9 @@ use image::{ImageBuffer, Luma};
 use log::info;
 use rayon::prelude::*;
 
-use crate::image::types::DataExtractor;
+use crate::charts::types::HistogramBin;
+
+use super::DataExtractor;
 
 type Histogram = Vec<u32>;
 
@@ -72,6 +74,42 @@ where
             histogram[bin_index] += 1;
             histogram
         })
+}
+
+pub fn calculate_histogram_min_max(vals: Vec<&u16>, num_bins: u32) -> Vec<HistogramBin> {
+    let min_value = match vals.iter().min() {
+        Some(&&val) => val as u32,
+        None => return Vec::new(),
+    };
+
+    let max_value = match vals.iter().max() {
+        Some(&&val) => val as u32,
+        None => return Vec::new(),
+    };
+
+    let range = max_value - min_value;
+    let bin_size = if range < num_bins { 1 } else { (range + 1) / num_bins };
+
+    let mut bins = vec![HistogramBin { range: 0, count: 0 }; num_bins as usize];
+
+    for &value in vals.iter() {
+        let value = *value as u32;
+        let bin_index = if bin_size > 0 {
+            ((value - min_value) / bin_size) as usize
+        } else {
+            0
+        };
+
+        let bin_index = bin_index.min(num_bins as usize - 1);
+        bins[bin_index].count += 1;
+    }
+
+    // Update range for each bin
+    for (i, bin) in bins.iter_mut().enumerate() {
+        bin.range = min_value + (i as u32 * bin_size);
+    }
+
+    bins
 }
 
 fn create_lut(histogram: &Histogram) -> Vec<u32> {
