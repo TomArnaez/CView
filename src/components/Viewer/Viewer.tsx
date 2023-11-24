@@ -3,7 +3,7 @@ import { Annotation, ImageMetadata, Point, commands } from "../../bindings";
 import Canvas from "./Canvas";
 import { Mode } from "../../types/draw";
 import CanvasOverlay from "./Overlay";
-import { useImageStore } from "../../stores/ImageStore";
+import { useImageStore } from "../../stores/imageStore";
 
 type ViewerProps = {
   drawMode: Mode;

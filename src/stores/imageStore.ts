@@ -3,6 +3,8 @@ import { ImageMetadata, ImageStack, events } from "../bindings";
 import { Image } from "../types/imagestate";
 import { invoke } from "@tauri-apps/api/primitives";
 import { UnlistenFn } from "@tauri-apps/api/event";
+import { useAppSettingsStore } from "./appSettingsStore";
+import { parseBuffer } from "../utils/StreamBuffer";
 
 interface ImageState {
   imageStacks: ImageStack[];
@@ -33,17 +35,16 @@ const listenStreamEvent = async (
   set: SetState<ImageState>
 ): Promise<UnlistenFn> => {
   return events.streamCaptureEvent.listen(async () => {
-    const data = new Uint8Array(
-      await invoke("read_stream_buffer", { saturatedPixelThreshold: 16000 })
-    );
-    if (data.length != 0) {
-      const width = 1031;
-      const height = 1536;
-      const newImage: Image = {
-        width: width,
-        height: height,
-        data: data,
-      };
+    const { saturatedPixelThreshold, saturatedPixelRGBColour } = useAppSettingsStore.getState();
+    console.log(saturatedPixelRGBColour);
+    const data: ArrayBuffer = await invoke("read_stream_buffer", {
+      saturatedPixelThreshold,
+      saturatedPixelRgbColour: saturatedPixelRGBColour
+    });
+
+    if (data.byteLength != 0) {
+      const newImage = parseBuffer(data);
+      console.log(newImage);
       set({ currentImage: newImage });
     }
   });
@@ -54,23 +55,20 @@ const setCurrentImageAsync = async (
   stackIdx: number,
   set: SetState<ImageState>
 ) => {
-  const data = new Uint8Array(
-    await invoke("get_image_binary_rgba", {
-      imageIdx,
-      stackIdx,
-      resize: null,
-      saturatedPixelThreshold: 16000,
-    })
-  );
-  const width = 1031;
-  const height = 1536;
-  const newImage: Image = {
-    width: width,
-    height: height,
-    data: data,
-  };
-  console.log(newImage.data);
-  set({ currentImage: newImage });
+  const { saturatedPixelThreshold, saturatedPixelRGBColour } = useAppSettingsStore.getState();
+  const data: ArrayBuffer = await invoke("get_image_binary_rgba", {
+    imageIdx,
+    stackIdx,
+    resize: null,
+    saturatedPixelThreshold,
+    saturatedPixelRgbColour: saturatedPixelRGBColour
+  });
+
+  if (data.byteLength != 0) {
+    const newImage = parseBuffer(data);
+    console.log(newImage);
+    set({ currentImage: newImage });
+  }
 };
 
 export const useImageStore = create<ImageState>()((set, get) => ({
@@ -83,7 +81,12 @@ export const useImageStore = create<ImageState>()((set, get) => ({
   _unlistenStream: null,
 
   refreshCurrentImage: () => {
-    setCurrentImageAsync(get().currentImageIndex, get().currentStackIndex, set);
+    const { saturatedPixelThreshold } = useAppSettingsStore.getState();
+    setCurrentImageAsync(
+      get().currentImageIndex,
+      get().currentStackIndex,
+      set
+    );
   },
 
   getCurrentMetaData: () => {
@@ -178,13 +181,11 @@ export const useImageStore = create<ImageState>()((set, get) => ({
     }),
   setImage: (idx) => set(() => ({ currentImageIndex: idx })),
   updateStacks: (newStacks) => {
-    // Calculate the index of the last stack
     const lastStackIndex = newStacks.length - 1;
 
-    // Update the state with the new stacks, set current stack to last and image index to 0
     set(() => ({
       imageStacks: newStacks,
-      currentStackIndex: Math.max(0, lastStackIndex), // Ensure it's not negative
+      currentStackIndex: Math.max(0, lastStackIndex),
       currentImageIndex: 0,
     }));
   },

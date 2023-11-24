@@ -2,34 +2,36 @@ import { Group, Rect, Text } from "react-konva";
 import { CaptureResultData } from "../../bindings";
 
 export const renderCaptureData = (
-  extraData: CaptureResultData | null
+  extraData: CaptureResultData | null,
+  sceneScale: number
 ): React.ReactElement | null => {
   if (extraData == null) {
     return null;
   }
   switch (extraData.type) {
     case "SmartCaptureData":
+      console.log(extraData)
       return (
-        <Group>
+        <>
           <Rect
-            x={extraData.background_rect.pos.x}
-            y={extraData.background_rect.pos.y}
-            width={extraData.background_rect.width}
-            height={extraData.background_rect.height}
+            x={extraData.background_rect.pos.x * sceneScale}
+            y={extraData.background_rect.pos.y * sceneScale}
+            width={extraData.background_rect.width * sceneScale}
+            height={extraData.background_rect.height * sceneScale}
             stroke={"blue"}
             strokeWidth={1}
           ></Rect>
-           <Text x={extraData.background_rect.pos.x} y={extraData.background_rect.pos.y - 10} text="Background Window" fontSize={7} fill="red"/>        
+           <Text x={extraData.background_rect.pos.x * sceneScale} y={(extraData.background_rect.pos.y - 10) * sceneScale} text="Background Window" fontSize={7*sceneScale} fill="red"/>        
           <Rect
-            x={extraData.foreground_rect.pos.x}
-            y={extraData.foreground_rect.pos.y}
-            width={extraData.foreground_rect.width}
-            height={extraData.foreground_rect.height}
+            x={extraData.foreground_rect.pos.x * sceneScale}
+            y={extraData.foreground_rect.pos.y * sceneScale}
+            width={extraData.foreground_rect.width * sceneScale}
+            height={extraData.foreground_rect.height * sceneScale}
             stroke={"blue"}
             strokeWidth={1}
           ></Rect>
-            <Text x={extraData.foreground_rect.pos.x} y={extraData.foreground_rect.pos.y - 10} text="Foreground Window" fontSize={7} fill="red"/>        
-          </Group>
+            <Text x={extraData.foreground_rect.pos.x * sceneScale} y={(extraData.foreground_rect.pos.y - 10) * sceneScale} text="Foreground Window" fontSize={7*sceneScale} fill="red"/>        
+          </>
       );
     case "SignalAccumulationData": {
       return null;

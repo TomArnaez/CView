@@ -84,7 +84,7 @@ histogramEvent: "plugin:tauri-specta:histogram-event"
 
 /** user-defined types **/
 
-export type AdvancedCapture = ({ type: "SmartCapture" } & SmartCapture) | ({ type: "SignalAccumulationCapture" } & SignalAccumulation) | ({ type: "MultiCapture" } & MultiCapture) | ({ type: "LiveCapture" } & LiveCapture)
+export type AdvancedCapture = ({ type: "SmartCapture" } & SmartCapture) | ({ type: "SignalAccumulationCapture" } & SignalAccumulation) | ({ type: "MultiCapture" } & MultiCapture) | ({ type: "LiveCapture" } & LiveCapture) | ({ type: "DarkMapCapture" } & DarkMapCapture) | ({ type: "DefectMapCapture" } & DefectMapCapture)
 export type Annotation = { Rect: Rect } | { Line: Line }
 export type BinningModesRS = RemoteBinningModes
 export type CancelCaptureEvent = []
@@ -99,6 +99,8 @@ export type Chart = "Histogram" | "LineProfile"
 export type ChartData = { LineProfileData: LineProfileData[] } | { HistogramData: HistogramBin[] }
 export type ChartDataEvent = ChartData
 export type CorrectionError = { SLError: InternalSLError } | { FileNotFound: string }
+export type DarkMapCapture = { exp_times: number[]; frames_per_capture: number }
+export type DefectMapCapture = { exp_times: number[]; frames_per_capture: number }
 export type FullWellModesRS = { remote_ty: RemoteFullWellModes }
 export type Histogram = number[]
 export type HistogramBin = { range: number; count: number }

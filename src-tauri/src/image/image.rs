@@ -284,7 +284,7 @@ impl ImageHandler {
         lut
     }
 
-    pub fn get_rgba_image(&self, saturated_pixel_threshold: Option<u32>) -> Vec<u8> {
+    pub fn get_rgba_image(&self, saturated_pixel_threshold: Option<u32>, size: Option<(u32, u32)>) -> Vec<u8> {
         println!("{:?}", saturated_pixel_threshold);
         let mut thresholded_image = self.image.clone();
 
@@ -296,6 +296,10 @@ impl ImageHandler {
                 *p = lut_val as u16;
             });
         };
+
+        if let Some(size) = size {
+            thresholded_image = imageops::resize(&thresholded_image, size.0, size.1, imageops::FilterType::Nearest);
+        }
 
         let mut data: Vec<u8> = Vec::new();
 

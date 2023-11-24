@@ -14,7 +14,7 @@ export const GeneralSettingsForm = (): JSX.Element => {
   return ( 
     <>
       <Center>
-        <Title order={2}>Application Settings</Title>
+        <Title order={4}>Application Settings</Title>
       </Center>
       <br/>
       <Checkbox label="Auto-Save Captures" checked={autoSaveCaptures} onChange={() => setAutoSaveCaptures(!autoSaveCaptures)}></Checkbox>

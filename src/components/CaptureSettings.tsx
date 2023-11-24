@@ -166,35 +166,9 @@ const SmartCaptureEditor = ({
           })}
         ></MultiSelect>
       </Grid.Col>
-      <Grid.Col span={12}>
-        <Checkbox
-          label="Apply Median Filtering"
-          checked={captureMode.median_filtered}
-          onChange={() => {
-            captureMode.median_filtered = true;
-            console.log(captureMode.median_filtered);
-            //captureMode.median_filtered = event.currentTarget.checked;
-            //console.log(captureMode.median_filtered);
-          }}
-        />
-      </Grid.Col>
     </Grid>
   );
 };
-
-/*
-type DarkMapCaptureEditorProps = {
-  captureMode: DarkMapCapture;
-};
-
-const DarkMapCaptureEditor = ({
-  captureMode,
-  darkMapExps,
-  setCaptureMode,
-}: SmartCaptureEditorProps): JSX.Element => {
-  return;
-};
-*/
 
 const editorConfiguration = {
   SignalAccumulationCapture: SignalAccumulatiorCaptureEditor,

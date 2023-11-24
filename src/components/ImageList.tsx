@@ -6,10 +6,11 @@ import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/primitives";
 import { camelCaseToWords } from "../utils";
 import { useContextMenu } from "mantine-contextmenu";
-import { useImageStore } from "../stores/ImageStore";
+import { useImageStore } from "../stores/imageStore";
+import { parseBuffer } from "../utils/StreamBuffer";
 
 export const ImageList = (): JSX.Element => {
-  const thumbnailSize = 300;
+  const thumbnailSize = [300, 700];
 
   const [thumbnails, setThumbnails] = useState<HTMLCanvasElement[]>([]);
   const { imageStacks, currentStackIdx, setStack } = useImageStore((state) => ({
@@ -30,19 +31,19 @@ export const ImageList = (): JSX.Element => {
   }, [imageStacks]);
 
   const getThumbnail = async (stackIdx: number): Promise<HTMLCanvasElement> => {
-    const image_data: Uint8Array = new Uint8Array(
+    const image = parseBuffer((
       await invoke("get_image_binary_rgba", {
         imageIdx: 0,
         stackIdx,
         resizeSize: thumbnailSize,
       })
-    );
+    ));
 
     const canvas = document.createElement("canvas");
     const ctx = canvas.getContext("2d");
     if (ctx) {
-      const imageData = ctx.createImageData(thumbnailSize, thumbnailSize);
-      imageData.data.set(image_data);
+      const imageData = ctx.createImageData(thumbnailSize[0], thumbnailSize[1]);
+      imageData.data.set(image.data);
       ctx.putImageData(imageData, 0, 0);
     }
     return canvas;

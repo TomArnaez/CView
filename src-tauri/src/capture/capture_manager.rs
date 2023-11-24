@@ -6,7 +6,6 @@ use std::{
         atomic::{AtomicBool, Ordering},
         Arc, Mutex,
     },
-    thread::JoinHandle,
 };
 
 use async_stream::stream;
@@ -20,7 +19,7 @@ use tauri_specta::Event;
 use crate::{capture::corrections::run_defect_map_gen, wrapper::*};
 
 use super::{
-    advanced_capture::LiveCapture,
+    advanced_capture::{LiveCapture, DarkMapCapture, DefectMapCapture},
     capture::{CaptureError, CaptureSettingBuilder, SequenceCapture},
     detector::{DetectorController, DetectorStatus},
     types::{
@@ -77,7 +76,16 @@ impl CaptureManager {
         }
     }
 
-    pub fn generate_dark_maps(&self, exp_times: Vec<u32>, num_frames: u32) {
+    pub fn generate_dark_maps<T: Runtime>(&self, app: AppHandle<T>,
+        exp_times: Vec<u32>, num_frames: u32) {
+        self.info.lock().unwrap().status =
+        CaptureManagerStatus::Capturing(AdvancedCapture::DarkMapCapture(DarkMapCapture {
+            exp_times: vec![100, 200],
+            frames_per_capture: 10
+        }));
+        self.emit_event(app.clone());
+
+
         let detector_controller = self.detector_controller.clone();
         let dark_maps = self.dark_maps.clone();
         let dark_map_path = self.dark_map_path.clone();
@@ -85,10 +93,6 @@ impl CaptureManager {
         let info = self.info.clone();
         let stop_signal_clone: Arc<AtomicBool> = self.stop_signal.clone();
 
-        info.lock().unwrap().status =
-            CaptureManagerStatus::Capturing(AdvancedCapture::LiveCapture(LiveCapture {
-                exp_time: 100,
-            }));
 
         tauri::async_runtime::spawn(async move {
             stream::iter(exp_times)
@@ -156,6 +160,14 @@ impl CaptureManager {
         dark_exp_times: Vec<u32>,
         num_frames: u32,
     ) {
+        self.info.lock().unwrap().status =
+            CaptureManagerStatus::Capturing(AdvancedCapture::DefectMapCapture(DefectMapCapture {
+                exp_times: vec![100, 200],
+                frames_per_capture: 10
+            }));
+
+        self.emit_event(app.clone());
+
         let detector_controller = self.detector_controller.clone();
         let dark_maps = self.dark_maps.clone();
         let defect_map = self.defect_map.clone();
@@ -163,16 +175,7 @@ impl CaptureManager {
         let info = self.info.clone();
 
         let stop_signal_clone: Arc<AtomicBool> = self.stop_signal.clone();
-        info.lock().unwrap().status =
-            CaptureManagerStatus::Capturing(AdvancedCapture::LiveCapture(LiveCapture {
-                exp_time: 100,
-            }));
-
         tauri::async_runtime::spawn(async move {
-            info.lock().unwrap().status =
-                CaptureManagerStatus::Capturing(AdvancedCapture::LiveCapture(LiveCapture {
-                    exp_time: 100,
-                }));
             stream::iter(dark_exp_times)
                 .flat_map(|exp_time| {
                     let full_well_modes = [
@@ -345,7 +348,6 @@ impl CaptureManager {
         self.stop_signal.store(false, Ordering::SeqCst);
 
         let stream = capture.start_stream(
-            app,
             self.detector_controller.clone(),
             self.dark_maps.clone(),
             self.defect_map.clone(),

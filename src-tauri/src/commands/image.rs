@@ -15,14 +15,18 @@ pub fn get_image_binary_rgba(
     stack_idx: u32,
     image_idx: u32,
     saturated_pixel_threshold: Option<u32>,
-    resize_size: Option<u32>,
+    saturated_pixel_rgb: Option<String>,
+    resize_size: Option<(u32, u32)>,
 ) -> Response {
     let image_service = image_service_mutex.lock().unwrap();
 
     if let Some(image_handler) = image_service.get_handler(stack_idx as usize, image_idx as usize) {
-        return Response::new(image_handler.get_rgba_image(saturated_pixel_threshold));
+        let mut return_data = Vec::new();
+        return_data.extend_from_slice(&image_handler.image.width().to_le_bytes());
+        return_data.extend_from_slice(&image_handler.image.height().to_le_bytes());
+        return_data.append(&mut image_handler.get_rgba_image(saturated_pixel_threshold, resize_size));
+        return Response::new(return_data);
     }
-
     Response::new(vec![])
 }
 

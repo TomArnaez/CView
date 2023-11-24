@@ -3,7 +3,7 @@ use super::{
     detector::DetectorController,
     types::{AdvCapture, CaptureProgress, CaptureStreamItem},
 };
-
+use async_stream::stream;
 use crate::{
     image::{
         snr_threaded, CaptureResultData, ImageHandler, ImageMetadata, ImageMetadataBuilder,
@@ -59,15 +59,46 @@ pub struct DarkMapCapture {
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, Type, PartialEq)]
+pub struct DefectMapCapture {
+    pub exp_times: Vec<u32>,
+    pub frames_per_capture: u32,
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug, Type, PartialEq)]
 #[serde(tag = "type")]
 pub struct LiveCapture {
     pub exp_time: u32,
 }
 
-impl AdvCapture for LiveCapture {
-    fn start_stream<T: Runtime>(
+impl AdvCapture for DarkMapCapture {
+    fn start_stream(
         &self,
-        app: AppHandle<T>,
+        detector_controller_mutex: Arc<Mutex<DetectorController>>,
+        dark_maps_mutex: Arc<Mutex<HashMap<u32, SLImageRs>>>,
+        defect_map_mutex: Arc<Mutex<Option<SLImageRs>>>,
+        stop_signal: Arc<AtomicBool>,
+    ) -> Pin<Box<dyn Stream<Item = CaptureStreamItem> + Send>> {
+        let stream = stream! { yield CaptureStreamItem::Progress(CaptureProgress::new(0, "test".to_string())) };
+        Box::pin(stream)
+    }
+}
+
+impl AdvCapture for DefectMapCapture {
+    fn start_stream(
+        &self,
+        detector_controller_mutex: Arc<Mutex<DetectorController>>,
+        dark_maps_mutex: Arc<Mutex<HashMap<u32, SLImageRs>>>,
+        defect_map_mutex: Arc<Mutex<Option<SLImageRs>>>,
+        stop_signal: Arc<AtomicBool>,
+    ) -> Pin<Box<dyn Stream<Item = CaptureStreamItem> + Send>> {
+        let stream = stream! { yield CaptureStreamItem::Progress(CaptureProgress::new(0, "test".to_string())) };
+        Box::pin(stream)
+    }
+}
+
+impl AdvCapture for LiveCapture {
+    fn start_stream(
+        &self,
         detector_controller_mutex: Arc<Mutex<DetectorController>>,
         dark_maps_mutex: Arc<Mutex<HashMap<u32, SLImageRs>>>,
         defect_map_mutex: Arc<Mutex<Option<SLImageRs>>>,
@@ -91,12 +122,14 @@ impl AdvCapture for LiveCapture {
 
         let s = stream
             .map(move |mut image| {
-                CaptureStreamItem::Image(ImageHandler::new(
+                let mut image_handler = ImageHandler::new(
                     image.to_image_buffer(),
                     ImageMetadataBuilder::new()
                         .capture_settings(capture_settings.clone())
                         .build(),
-                ))
+                );
+                image_handler.apply_histogram_equilization();
+                CaptureStreamItem::Image(image_handler)
             })
             .boxed();
 
@@ -105,9 +138,8 @@ impl AdvCapture for LiveCapture {
 }
 
 impl AdvCapture for SmartCapture {
-    fn start_stream<T: Runtime>(
+    fn start_stream(
         &self,
-        app: AppHandle<T>,
         detector_controller_mutex: Arc<Mutex<DetectorController>>,
         dark_maps_mutex: Arc<Mutex<HashMap<u32, SLImageRs>>>,
         defect_map_mutex: Arc<Mutex<Option<SLImageRs>>>,
@@ -115,8 +147,7 @@ impl AdvCapture for SmartCapture {
     ) -> Pin<Box<dyn Stream<Item = CaptureStreamItem> + Send>> {
         info!("Starting Smart Capture");
 
-        let best_capture: Arc<Mutex<(Option<ImageHandler>, f64)>> =
-            Arc::new(Mutex::new((None, 0.0))); // (Best image buffer, Best SNR)
+        let best_capture: Arc<Mutex<(Option<ImageHandler>, f64)>> = Arc::new(Mutex::new((None, 0.0)));
 
         let streams = self
             .exp_times
@@ -137,7 +168,14 @@ impl AdvCapture for SmartCapture {
                 let window_size = self.window_size;
                 let best_capture = best_capture.clone();
 
-                detector_controller
+                let progress_stream = stream::once(async move {
+                    CaptureStreamItem::Progress(CaptureProgress::new(
+                        0,
+                        format!("Capturing images for exposure time {exp_time}ms").to_string(),
+                    ))
+                });
+
+                let capture_stream = detector_controller
                     .run_capture_stream(
                         capture_settings.clone(),
                         dark_maps_mutex.clone(),
@@ -146,8 +184,10 @@ impl AdvCapture for SmartCapture {
                     )
                     .expect("Failed to run capture stream")
                     .map(move |mut image| {
+                        info!("got image");
                         let image_buffer = image.to_image_buffer();
                         let snr_results = snr_threaded(&image_buffer, window_size).unwrap();
+                        info!("done snr");
                         let image_metadata = ImageMetadataBuilder::new()
                             .capture_settings(capture_settings.clone())
                             .extra_info(CaptureResultData::SmartCaptureData(SmartCaptureData {
@@ -157,32 +197,50 @@ impl AdvCapture for SmartCapture {
                             }))
                             .build();
 
+
+                        let mut image_handler = ImageHandler::new(image_buffer, image_metadata);
+
+                        image_handler.apply_histogram_equilization();
+
                         let mut best = best_capture.lock().unwrap();
                         if snr_results.0 > best.1 {
-                            // Compare SNR
-                            *best = (
-                                Some(ImageHandler::new(image_buffer, image_metadata)),
-                                snr_results.0,
-                            );
+                            *best = (Some(image_handler.clone()), snr_results.0);
                         }
-                    })
+
+                        CaptureStreamItem::Image(image_handler)
+                    });
+
+                    progress_stream.chain(capture_stream)
             })
             .collect::<Vec<_>>();
 
-        use async_stream::stream;
-        let guard = best_capture.lock().unwrap();
-        let best_image = guard.0.clone().unwrap();
-        stream! {
-            yield CaptureStreamItem::Image(best_image);
+            let mut stream = stream::iter(streams).flatten().boxed();
+
+            let best_capture = best_capture.clone();
+            let new_stream = stream! {
+                while let Some(stream_item) = stream.next().await {
+                    yield stream_item;
+                }
+
+                let final_best_image = {
+                    let best_capture_guard = best_capture.lock().unwrap();
+                    best_capture_guard.0.clone()
+                };
+
+
+                if let Some(image_handler) = final_best_image {
+                    info!("{:?}", image_handler.image_metadata);
+                    yield CaptureStreamItem::CaptureResult(vec![image_handler]);
+                }
+            };
+
+            Box::pin(new_stream)
         }
-        .boxed()
-    }
 }
 
 impl AdvCapture for SignalAccumulationCapture {
-    fn start_stream<T: Runtime>(
+    fn start_stream(
         &self,
-        app: AppHandle<T>,
         detector_controller_mutex: Arc<Mutex<DetectorController>>,
         dark_maps_mutex: Arc<Mutex<HashMap<u32, SLImageRs>>>,
         defect_map_mutex: Arc<Mutex<Option<SLImageRs>>>,
@@ -193,6 +251,8 @@ impl AdvCapture for SignalAccumulationCapture {
 
         let last_image_mutex: Arc<Mutex<Option<ImageBuffer<Luma<u16>, Vec<u16>>>>> =
             Arc::new(Mutex::new(None));
+        
+        let capture_result: Arc<Mutex<Option<Vec<ImageHandler>>>> = Arc::new(Mutex::new(Some(Vec::new())));
 
         let streams = self
             .exp_times
@@ -209,9 +269,17 @@ impl AdvCapture for SignalAccumulationCapture {
                 .build();
 
                 let last_image = Arc::clone(&last_image_mutex);
-                let accumulated_exp_time = Arc::new(Mutex::new(0 as u32));
+                let capture_result = capture_result.clone();
+                let accumulated_exp_time = Arc::new(Mutex::new(exp_time));
 
-                detector_controller
+                let progress_stream = stream::once(async move {
+                    CaptureStreamItem::Progress(CaptureProgress::new(
+                        0,
+                        format!("Capturing images for exposure time {exp_time}ms").to_string(),
+                    ))
+                });
+
+                let capture_stream = detector_controller
                     .run_capture_stream(
                         capture_settings.clone(),
                         dark_maps_mutex.clone(),
@@ -232,9 +300,7 @@ impl AdvCapture for SignalAccumulationCapture {
                             );
                         }
 
-                        *accumulated_exp_time.lock().unwrap() += exp_time;
-
-                        CaptureStreamItem::Image(ImageHandler::new(
+                        let mut image_handler = ImageHandler::new(
                             image_buffer,
                             ImageMetadataBuilder::new()
                                 .capture_settings(capture_settings.clone())
@@ -244,31 +310,53 @@ impl AdvCapture for SignalAccumulationCapture {
                                     },
                                 ))
                                 .build(),
-                        ))
-                    })
-                    .chain(stream::once(async move {
-                        CaptureStreamItem::Progress(CaptureProgress::new(
-                            0,
-                            format!("Capturing images for exposure time {exp_time}ms").to_string(),
-                        ))
-                    }))
+                        );
+
+                        image_handler.apply_histogram_equilization();
+
+                        let mut lock = capture_result.lock().unwrap();
+                        let mut_vec = lock.as_mut();
+                        mut_vec.unwrap().push(image_handler.clone());
+
+                        *accumulated_exp_time.lock().unwrap() += exp_time;
+
+                        CaptureStreamItem::Image(image_handler)
+                    });
+
+                    progress_stream.chain(capture_stream)
             })
             .collect::<Vec<_>>();
 
-        stream::iter(streams).flatten().boxed()
+            let mut stream = stream::iter(streams).flatten().boxed();
+
+            let capture_result = capture_result.clone();
+            let new_stream = stream! {
+                while let Some(stream_item) = stream.next().await {
+                    yield stream_item;
+                }
+
+                let capture_result_vec = {
+                    capture_result.lock().unwrap().take().unwrap()
+                };
+
+                yield CaptureStreamItem::CaptureResult(capture_result_vec);
+            };
+
+            Box::pin(new_stream)
     }
 }
 
 impl AdvCapture for MultiCapture {
-    fn start_stream<T: Runtime>(
+    fn start_stream(
         &self,
-        app: AppHandle<T>,
         detector_controller_mutex: Arc<Mutex<DetectorController>>,
         dark_maps_mutex: Arc<Mutex<HashMap<u32, SLImageRs>>>,
         defect_map_mutex: Arc<Mutex<Option<SLImageRs>>>,
         stop_signal: Arc<AtomicBool>,
     ) -> Pin<Box<dyn Stream<Item = CaptureStreamItem> + Send>> {
         info!("Starting Multi Capture");
+
+        let capture_result = Arc::new(Mutex::new(Some(Vec::new())));
 
         let streams = self
             .exp_times
@@ -288,8 +376,16 @@ impl AdvCapture for MultiCapture {
                 .build();
 
                 let stop_signal_clone = stop_signal.clone();
+                let capture_result = capture_result.clone();
 
-                detector_controller
+                let progress_stream = stream::once(async move {
+                    CaptureStreamItem::Progress(CaptureProgress::new(
+                        0,
+                        format!("Capturing images for exposure time {exp_time}ms").to_string(),
+                    ))
+                });
+
+                let capture_stream = detector_controller
                     .run_capture_stream(
                         capture_settings.clone(),
                         dark_maps_mutex.clone(),
@@ -302,26 +398,50 @@ impl AdvCapture for MultiCapture {
                         async move { !stop_signal_clone_inner.load(Ordering::Relaxed) }
                     })
                     .map(move |mut image| {
-                        CaptureStreamItem::Image(ImageHandler::new(
+                        let mut image_handler = ImageHandler::new(
                             image.to_image_buffer(),
                             ImageMetadata {
                                 capture_settings: Some(capture_settings.clone()),
                                 date_created: None,
                                 extra_info: None,
                             },
-                        ))
+                        );
+
+                        image_handler.apply_histogram_equilization();
+                        
+                        let mut lock = capture_result.lock().unwrap();
+                        let mut_vec = lock.as_mut();
+                        mut_vec.unwrap().push(image_handler.clone());
+
+                        CaptureStreamItem::Image(image_handler)
                     })
                     .chain(stream::once(async move {
                         CaptureStreamItem::Progress(CaptureProgress::new(
                             0,
                             format!("Capturing images for exposure time {exp_time}ms").to_string(),
                         ))
-                    }))
+                    }));
+
+                    progress_stream.chain(capture_stream)
             })
             .collect::<Vec<_>>();
 
-        stream::iter(streams).flatten().boxed()
-    }
+            let mut stream = stream::iter(streams).flatten().boxed();
+
+            let capture_result = capture_result.clone();
+            let new_stream = stream! {
+                while let Some(stream_item) = stream.next().await {
+                    yield stream_item;
+                }
+
+                let capture_result_vec = {
+                    capture_result.lock().unwrap().take().unwrap()
+                };
+
+                yield CaptureStreamItem::CaptureResult(capture_result_vec);
+            };
+
+            Box::pin(new_stream)    }
 }
 
 #[cfg(test)]

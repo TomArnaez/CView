@@ -1,13 +1,15 @@
 use image::{ImageBuffer, Luma};
 use image_lib::GenericImageView;
+use log::info;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use std::sync::{Arc, Mutex};
 use std::thread;
+use std::time::Instant;
 
 use crate::image::types::{Point, Rect};
 
 pub fn snr(
-    image: &mut ImageBuffer<Luma<u16>, Vec<u16>>,
+    image: &ImageBuffer<Luma<u16>, Vec<u16>>,
     window_size: u32,
 ) -> Result<(f64, Rect, Rect), ()> {
     let mut min_mean: f64 = u32::MAX as f64;
@@ -96,27 +98,47 @@ pub fn snr_threaded(
         },
     }));
 
-    let positions = (0..width - window_size)
-        .flat_map(move |x| (0..height - window_size).map(move |y| (x, y)))
-        .collect::<Vec<_>>();
+    let integral_image = compute_integral_image(image);
 
-    positions.into_par_iter().for_each(|(x, y)| {
-        let window = image.view(x, y, window_size, window_size).to_image();
-        let (window_mean, _) = calculate_mean_and_std(&window);
+    let positions = (0..width - (window_size - 1))
+    .flat_map(move |x| (0..height - (window_size - 1)).map(move |y| (x, y)))
+    .collect::<Vec<_>>();
+
+    // Process each position concurrently
+    (0..width - (window_size - 1)).into_par_iter().for_each(|x| {
+        let mut local_min_mean = u32::MAX as f64;
+        let mut local_max_mean = 0.0;
+        let mut local_bg_rect = Rect {pos: Point { x: 0, y: 0}, width: 0, height :0}; // Replace with your default Rect
+        let mut local_fg_rect = Rect {pos: Point { x: 0, y: 0}, width: 0, height :0}; // Replace with your default Rect
+
+        for y in 0..height - (window_size - 1) {
+            let sum = area_sum(&integral_image, x, y, window_size);
+            let window_mean = sum as f64 / (window_size * window_size) as f64;
+
+            if window_mean < local_min_mean {
+                local_min_mean = window_mean;
+                local_bg_rect = Rect { pos: Point { x, y}, width: window_size, height: window_size };
+            }
+            if window_mean > local_max_mean {
+                local_max_mean = window_mean;
+                local_fg_rect = Rect { pos: Point { x, y}, width: window_size, height: window_size };
+            }
+        }
 
         let mut state = shared_state.lock().unwrap();
-        if window_mean < state.min_mean {
-            state.min_mean = window_mean;
-            state.bg_rect.pos = Point { x, y };
+        if local_min_mean < state.min_mean {
+            state.min_mean = local_min_mean;
+            state.bg_rect = local_bg_rect;
         }
-        if window_mean > state.max_mean {
-            state.max_mean = window_mean;
-            state.fg_rect.pos = Point { x, y };
+        if local_max_mean > state.max_mean {
+            state.max_mean = local_max_mean;
+            state.fg_rect = local_fg_rect;
         }
     });
 
     let state = shared_state.lock().unwrap();
     let snr = (state.max_mean - state.min_mean) / (state.min_mean - 300.0).abs();
+
     Ok((snr, state.bg_rect.clone(), state.fg_rect.clone()))
 }
 
@@ -214,18 +236,77 @@ pub fn get_points_along_line(x1: isize, y1: isize, x2: isize, y2: isize) -> Vec<
     points
 }
 
+fn compute_integral_image(image: &ImageBuffer<Luma<u16>, Vec<u16>>) -> Vec<Vec<u64>> {
+    let width = image.width() as usize;
+    let height = image.height() as usize;
+
+    // Create a 2D vector filled with zeros
+    let mut integral_image = vec![vec![0u64; width]; height];
+
+    for y in 0..height {
+        for x in 0..width {
+            let left = if x > 0 { integral_image[y][x - 1] } else { 0 };
+            let above = if y > 0 { integral_image[y - 1][x] } else { 0 };
+            let above_left = if x > 0 && y > 0 { integral_image[y - 1][x - 1] } else { 0 };
+
+            // Pixel value at (x, y)
+            let pixel_value = image.get_pixel(x as u32, y as u32).0[0] as u64;
+
+            integral_image[y][x] = pixel_value + left + above - above_left;
+        }
+    }
+
+    integral_image
+}
+
+fn area_sum(integral_image: &[Vec<u64>], x: u32, y: u32, window_size: u32) -> u64 {
+    let x = x as usize;
+    let y = y as usize;
+    let window_size = window_size as usize;
+
+    // Bottom right corner of the window
+    let br_x = x + window_size - 1;
+    let br_y = y + window_size - 1;
+
+    // Sum within the window is calculated using the values at the corners of the window
+    let sum_br = integral_image[br_y][br_x]; // Bottom right
+
+    // The other three corners (top left, top right, bottom left)
+    let sum_tl = if x > 0 && y > 0 {
+        integral_image[y - 1][x - 1]
+    } else {
+        0
+    };
+    let sum_tr = if y > 0 {
+        integral_image[y - 1][br_x]
+    } else {
+        0
+    };
+    let sum_bl = if x > 0 {
+        integral_image[br_y][x - 1]
+    } else {
+        0
+    };
+
+    // Final sum calculation
+    sum_br + sum_tl - sum_tr - sum_bl
+}
+
+
 #[cfg(test)]
 mod tests {
     use std::ops::DerefMut;
 
     use super::*;
     use image::{GenericImage, ImageBuffer, Luma};
+    use imageproc::integral_image;
     use log::info;
 
     fn create_test_image(width: u32, height: u32, value: u16) -> ImageBuffer<Luma<u16>, Vec<u16>> {
         ImageBuffer::from_pixel(width, height, Luma([value]))
     }
 
+    
     fn set_region_to_value(
         img: &mut ImageBuffer<Luma<u16>, Vec<u16>>,
         x: u32,
@@ -241,6 +322,27 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn test_integral() {
+        let test_image: ImageBuffer<Luma<u16>, Vec<u16>> = create_test_image(1031, 1536, 500);
+        let integral_image = compute_integral_image(&test_image);
+        let sum = area_sum(&integral_image, 50, 50, 50);
+        println!("{}", sum);
+    }
+
+    #[test]
+    fn test_snr() {
+        let mut test_image: ImageBuffer<Luma<u16>, Vec<u16>> = create_test_image(1031, 1536, 500);
+        let window_size = 50;
+
+        set_region_to_value(&mut test_image, 0, 0, 50, 50, 100);
+        let result = snr_threaded(&test_image, window_size);
+
+        assert!(result.is_ok());
+        let (snr, bg_rect, fg_rect) = result.unwrap();
+        println!("{} {:?} {:?}", snr, bg_rect, fg_rect);
     }
 
     #[test]

@@ -1,14 +1,11 @@
 use crate::capture::types::CaptureProgressEvent;
 use crate::capture::types::CaptureStreamItem;
 use crate::events::StreamCaptureEvent;
-use crate::image::ImageHandler;
 use crate::image::ImageStack;
 use crate::ImageService;
 use crate::StreamBuffer;
 use chrono::Utc;
-use concurrent_queue::ConcurrentQueue;
 use futures_util::{pin_mut, StreamExt};
-use image::EncodableLayout;
 use log::debug;
 use log::error;
 use log::info;
@@ -33,6 +30,8 @@ pub async fn run_capture(
     capture: AdvancedCapture,
     save_capture: bool,
 ) -> Result<(), CaptureError> {
+    let mut capture_result = None;
+
     let stream = capture_manager_mutex
         .lock()
         .unwrap()
@@ -40,18 +39,9 @@ pub async fn run_capture(
 
     pin_mut!(stream);
 
-    let mut image_handlers: Vec<ImageHandler> = Vec::new();
-
     while let Some(stream_item) = stream.next().await {
         match stream_item {
-        CaptureStreamItem::Image(mut image_handler) => {
-            image_handler.apply_histogram_equilization();
-            image_handler.invert_colours();
-
-            if save_capture {
-                image_handlers.push(image_handler.clone());
-            }
-    
+        CaptureStreamItem::Image(image_handler) => {
             let stream_buffer = stream_buffer_mutex.lock().unwrap();
             match stream_buffer.q.push(image_handler) {
                 Err(e) => error!("Failed to push to stream buffer with e {e}"),
@@ -63,6 +53,9 @@ pub async fn run_capture(
             }
 
         },
+        CaptureStreamItem::CaptureResult(vec) => {
+            capture_result = Some(vec);
+        },
         CaptureStreamItem::Progress(progress) => {
             info!("got progress event");
             match CaptureProgressEvent(progress).emit_all(&app) {
@@ -70,26 +63,28 @@ pub async fn run_capture(
                 _ => {}
                 }
             },
-        } 
+        }
     }
 
-    let image_stack = ImageStack {
-        timestamp: Some(Utc::now()),
-        image_handlers,
-        capture: Some(capture),
-    };
+    if let Some(capture_result) = capture_result {
+        info!("go capture result");
+        let image_stack = ImageStack {
+            timestamp: Some(Utc::now()),
+            image_handlers: capture_result,
+            capture: Some(capture),
+        };
+
+        image_service_mutex
+        .lock()
+        .unwrap()
+        .add_image_stack(image_stack);
+    }
 
     if (save_capture) {
         if let Ok(local_data_dir) = app.path().local_data_dir() {
 
         }
     }
-
-    image_service_mutex
-        .lock()
-        .unwrap()
-        .add_image_stack(image_stack);
-
 
     Ok(())
 }
@@ -105,11 +100,16 @@ pub fn stop_capture(capture_manager_mutex: State<Mutex<CaptureManager>>, stream_
 }
 
 #[tauri::command(async)]
-pub fn read_stream_buffer(stream_buffer_mutex: State<Mutex<StreamBuffer>>, saturated_pixel_threshold: Option<u32>) -> Response {
+pub fn read_stream_buffer(stream_buffer_mutex: State<Mutex<StreamBuffer>>, saturated_pixel_threshold: Option<u32>, saturated_pixel_RGB_colour: String) -> Response {
     debug!("Reading stream buffer");
     let stream_buffer = stream_buffer_mutex.lock().unwrap();
+    
     if let Ok(image_handler) = stream_buffer.q.pop() {
-        return Response::new(image_handler.get_rgba_image(saturated_pixel_threshold));
+        let mut return_data = Vec::new();
+        return_data.extend_from_slice(&image_handler.image.width().to_le_bytes());
+        return_data.extend_from_slice(&image_handler.image.height().to_le_bytes());
+        return_data.append(&mut image_handler.get_rgba_image(saturated_pixel_threshold, None));
+        return Response::new(return_data);
     }
     Response::new(vec![])
 }
@@ -124,7 +124,7 @@ pub async fn generate_defect_map(
     capture_manager_mutex
         .lock()
         .unwrap()
-        .generate_defect_map(app.clone(), vec![100, 200, 300], 10);
+        .generate_defect_map(app, vec![100, 200, 300], 10);
     Ok(())
 }
 
@@ -138,6 +138,6 @@ pub async fn generate_dark_maps(
     capture_manager_mutex
         .lock()
         .unwrap()
-        .generate_dark_maps(vec![100, 200, 300], 10);
+        .generate_dark_maps(app, vec![100, 200, 300], 10);
     Ok(())
 }

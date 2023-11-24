@@ -12,8 +12,8 @@ interface AppSettings {
 }
 
 export const useAppSettingsStore = create<AppSettings>( (set) => ({
-    saturatedPixelRGBColour: "red",
-    setSaturatedPixelRGBColour: (newColour: string) => set({ saturatedPixelRGBColour: newColour}),
+    saturatedPixelRGBColour: "rgb(250, 0, 0)",
+    setSaturatedPixelRGBColour: (newColour: string) => { console.log(newColour); set({ saturatedPixelRGBColour: newColour})},
     saturatedPixelThreshold: 16000,
     setSaturatedPixelThreshold: (newThreshold: number) => set(({saturatedPixelThreshold: newThreshold})),
     autoSaveCaptures: true,

@@ -11,7 +11,7 @@ use std::{
 use crate::{image::ImageHandler, wrapper::SLImageRs};
 
 use super::{
-    advanced_capture::{LiveCapture, MultiCapture, SignalAccumulationCapture, SmartCapture},
+    advanced_capture::{DarkMapCapture, LiveCapture, MultiCapture, SignalAccumulationCapture, SmartCapture, DefectMapCapture},
     detector::DetectorController,
 };
 use enum_dispatch::enum_dispatch;
@@ -49,11 +49,14 @@ pub enum AdvancedCapture {
     SignalAccumulationCapture,
     MultiCapture,
     LiveCapture,
+    DarkMapCapture,
+    DefectMapCapture
 }
 
 pub enum CaptureStreamItem {
     Image(ImageHandler),
-    Progress(CaptureProgress)
+    Progress(CaptureProgress),
+    CaptureResult(Vec<ImageHandler>)
 }
 
 
@@ -67,9 +70,8 @@ pub struct CaptureProgress {
 
 #[enum_dispatch]
 pub trait AdvCapture {
-    fn start_stream<T: Runtime>(
+    fn start_stream(
         &self,
-        app: AppHandle<T>,
         detector_controller_mutex: Arc<Mutex<DetectorController>>,
         dark_maps: Arc<Mutex<HashMap<u32, SLImageRs>>>,
         defect_map: Arc<Mutex<Option<SLImageRs>>>,

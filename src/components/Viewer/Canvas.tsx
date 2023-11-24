@@ -75,18 +75,27 @@ const Canvas = ({
 
   const handleKeyPress = useCallback(
     async (event: KeyboardEvent) => {
-      switch (event.key) {
-        case "k": {
+      console.log(event.key);
+      switch (event.key.toLowerCase()) {
+        case "j": {
           handleShowLineProfileChart();
           break;
         }
-        case "h": {
+        case "k": {
           handleShowHistogramChart();
+          break;
+        }
+        case "i": {
+          onInvertColours();
+          break;
+        }
+        case "h": {
+          onHistogramEquilization();
           break;
         }
       }
     },
-    [handleShowLineProfileChart, handleShowHistogramChart]
+    [handleShowLineProfileChart, handleShowHistogramChart, onInvertColours, onHistogramEquilization]
   );
 
   useEffect(() => {
@@ -347,7 +356,7 @@ const Canvas = ({
               ></Image>
             )}
             {getAnnotationComponent()}
-            {metadata && renderCaptureData(metadata.extra_info)}
+            {metadata && renderCaptureData(metadata.extra_info, sceneScale)}
           </Group>
         </Layer>
       </Stage>

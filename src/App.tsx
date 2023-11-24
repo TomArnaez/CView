@@ -43,14 +43,6 @@ import { useImageStore } from "./stores/ImageStore";
 import { GeneralSettingsForm } from "./components/GeneralSettingsForm";
 import { DarkMapGenerationForm } from "./components/DarkMapGenerationForm";
 
-import "@mantine/core/styles.css";
-import "mantine-contextmenu/styles.css";
-import classes from "./css/Button.module.css"
-import streamButtonClasses from "./css/StreamButton.module.css"
-
-console.log(streamButtonClasses)
-
-
 function App() {
   const [captureProgressModalOpened, setCaptureProgressModalOpened] =
     useState(false);
@@ -126,6 +118,7 @@ function App() {
     });
 
     events.captureManagerEvent.listen(async (e) => {
+      console.log(e.payload)
       setCaptureManagerInfo(e.payload);
     });
 
@@ -143,6 +136,7 @@ function App() {
   };
 
   const handleCapture = async (capture: AdvancedCapture) => {
+    setStreaming(true);
     setCaptureSettingsModalOpened(false);
     await commands.runCapture(capture, true);
   };
@@ -223,11 +217,6 @@ function App() {
           startCapture={handleCapture}
         />
       </Modal>
-      <Button
-              classNames = {{
-                root: classes.root
-              }}
-            >Helo</Button>
       <AppShell
         style={{
           width: "100vw",
@@ -298,10 +287,10 @@ function App() {
               </Menu.Dropdown>
             </Menu>
             <Button
-            classNames={{
-              root: classes.root,
-              label: classes.label
-            }}
+              style={{
+                height: "100%",
+                fontSize: 16
+              }}
               variant="filled"
               fullWidth
               color={captureManagerInfo.status == "Available" ? "blue" : "red"}
@@ -368,11 +357,25 @@ function App() {
             }}
           >
             <Button
-              className={`${streamButtonClasses.stream} ${streamButtonClasses.live}` }
+              style={{
+                height: "100%",
+                fontSize: 16
+              }}
+              variant="filled"
+              fullWidth
+              color={live ? "red" : "blue"}
+              disabled={
+                captureManagerInfo.status == "DetectorDisconnected" ||
+                captureManagerInfo.status == "DarkMapsRequired" ||
+                captureManagerInfo.status == "DefectMapsRequired" ||
+                (typeof captureManagerInfo.status === "object" && captureManagerInfo.status.Capturing.type != "LiveCapture")
+              }
+              onClick={() => {
+                live ? handleStopLive() : handleGoLive();
+                setLive(!live);
+              }}
             >
-              <div className={classes.label}>
                 {live ? "Stop Live" : "Go Live"}
-              </div>
             </Button>
           </div>
         </AppShell.Header>
