@@ -4,6 +4,7 @@ use crate::events::StreamCaptureEvent;
 use crate::image::ImageStack;
 use crate::ImageService;
 use crate::StreamBuffer;
+use crate::utils::parse_rgb;
 use chrono::Utc;
 use futures_util::{pin_mut, StreamExt};
 use log::debug;
@@ -100,15 +101,21 @@ pub fn stop_capture(capture_manager_mutex: State<Mutex<CaptureManager>>, stream_
 }
 
 #[tauri::command(async)]
-pub fn read_stream_buffer(stream_buffer_mutex: State<Mutex<StreamBuffer>>, saturated_pixel_threshold: Option<u32>, saturated_pixel_RGB_colour: String) -> Response {
+pub fn read_stream_buffer(stream_buffer_mutex: State<Mutex<StreamBuffer>>, saturated_pixel_threshold: Option<u32>, saturated_pixel_RGB_colour: Option<String>) -> Response {
     debug!("Reading stream buffer");
-    let stream_buffer = stream_buffer_mutex.lock().unwrap();
-    
+    let stream_buffer = stream_buffer_mutex.lock().unwrap();    
     if let Ok(image_handler) = stream_buffer.q.pop() {
         let mut return_data = Vec::new();
         return_data.extend_from_slice(&image_handler.image.width().to_le_bytes());
         return_data.extend_from_slice(&image_handler.image.height().to_le_bytes());
-        return_data.append(&mut image_handler.get_rgba_image(saturated_pixel_threshold, None));
+
+        if let Some(rgb) = saturated_pixel_RGB_colour {
+            let rgb = parse_rgb(&rgb);
+            return_data.append(&mut image_handler.get_rgba_image(saturated_pixel_threshold, None, Some(rgb.unwrap())));
+        }
+        else {
+            return_data.append(&mut image_handler.get_rgba_image(saturated_pixel_threshold, None, None));
+        }
         return Response::new(return_data);
     }
     Response::new(vec![])

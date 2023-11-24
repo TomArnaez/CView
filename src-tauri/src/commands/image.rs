@@ -24,7 +24,7 @@ pub fn get_image_binary_rgba(
         let mut return_data = Vec::new();
         return_data.extend_from_slice(&image_handler.image.width().to_le_bytes());
         return_data.extend_from_slice(&image_handler.image.height().to_le_bytes());
-        return_data.append(&mut image_handler.get_rgba_image(saturated_pixel_threshold, resize_size));
+        return_data.append(&mut image_handler.get_rgba_image(saturated_pixel_threshold, resize_size, None));
         return Response::new(return_data);
     }
     Response::new(vec![])

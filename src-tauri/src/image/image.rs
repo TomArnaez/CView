@@ -284,7 +284,7 @@ impl ImageHandler {
         lut
     }
 
-    pub fn get_rgba_image(&self, saturated_pixel_threshold: Option<u32>, size: Option<(u32, u32)>) -> Vec<u8> {
+    pub fn get_rgba_image(&self, saturated_pixel_threshold: Option<u32>, size: Option<(u32, u32)>, saturated_color: Option<(u8, u8, u8)>) -> Vec<u8> {
         println!("{:?}", saturated_pixel_threshold);
         let mut thresholded_image = self.image.clone();
 
@@ -311,23 +311,23 @@ impl ImageHandler {
             }
             if let Some(threshold) = saturated_pixel_threshold {
                 if *original > threshold as u16 {
-                    data.push(255); // Red
-                    data.push(0); // Green
-                    data.push(0); // Blue
-                    data.push(255 as u8); // Alpha
+                    data.push(255);
+                    data.push(0); 
+                    data.push(0); 
+                    data.push(255 as u8); 
                 }
                 else {
-                    data.push(scaled_value); // Red
-                    data.push(scaled_value); // Green
-                    data.push(scaled_value); // Blue
-                    data.push(255 as u8); // Alpha
+                    data.push(scaled_value); 
+                    data.push(scaled_value); 
+                    data.push(scaled_value); 
+                    data.push(255 as u8); 
                 }
             }
             else {
-                data.push(scaled_value); // Red
-                data.push(scaled_value); // Green
-                data.push(scaled_value); // Blue
-                data.push(255 as u8); // Alpha
+                data.push(scaled_value);
+                data.push(scaled_value); 
+                data.push(scaled_value);
+                data.push(255 as u8); 
             }
         }
 

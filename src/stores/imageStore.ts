@@ -81,7 +81,6 @@ export const useImageStore = create<ImageState>()((set, get) => ({
   _unlistenStream: null,
 
   refreshCurrentImage: () => {
-    const { saturatedPixelThreshold } = useAppSettingsStore.getState();
     setCurrentImageAsync(
       get().currentImageIndex,
       get().currentStackIndex,
@@ -111,7 +110,7 @@ export const useImageStore = create<ImageState>()((set, get) => ({
         const unlistenFn = await listenStreamEvent(set);
         return { _unlistenStream: unlistenFn, streaming: by };
       } else if (by === false && state._unlistenStream !== null) {
-        await state._unlistenStream();
+        state._unlistenStream();
         return { _unlistenStream: null, streaming: by };
       }
       return { streaming: by };

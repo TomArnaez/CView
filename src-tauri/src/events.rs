@@ -21,10 +21,5 @@ pub struct Histogram(Vec<u32>);
 #[derive(Clone, Serialize, Type, Event)]
 pub struct HistogramEvent(pub Histogram);
 
-/*
-#[derive(Clone, Serialize, Type, Event)]
-pub struct HistogramEvent(pub Histogram);
-*/
-
 #[derive(Serialize, Type, Event)]
 pub struct ImageStateEvent(Arc<ImageService>);
