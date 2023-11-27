@@ -1,21 +1,24 @@
 use futures_core::stream::Stream;
 use futures_util::StreamExt;
-use log::{error, info, debug};
+use log::{debug, error, info};
 use serde::Serialize;
 use specta::Type;
 use std::{
     collections::HashMap,
     future::{self},
     pin::Pin,
-    sync::{Arc, Mutex, atomic::AtomicBool},
+    sync::{atomic::AtomicBool, Arc, Mutex},
     thread,
-    time::Duration
+    time::Duration,
 };
 use tokio_util::sync::CancellationToken;
 
 use crate::wrapper::{SLDeviceRS, SLImageRs};
 
-use super::capture::{CaptureError, CaptureSetting};
+use super::{
+    capture::{CaptureError, CaptureSetting},
+    capture_manager::CorrectionMaps,
+};
 
 // Required for opening camera on a detector
 const BUFFER_DEPTH: u32 = 100;
@@ -28,10 +31,10 @@ pub enum DetectorStatus {
     Capturing,
 }
 
+#[derive(Clone)]
 pub struct DetectorController {
     detector: SLDeviceRS,
     detector_status: Arc<Mutex<DetectorStatus>>,
-    cancellation_token: Option<CancellationToken>,
 }
 
 impl DetectorController {
@@ -42,7 +45,6 @@ impl DetectorController {
         let controller = DetectorController {
             detector: SLDeviceRS::new(),
             detector_status: Arc::new(Mutex::new(DetectorStatus::Disconnected)),
-            cancellation_token: None,
         };
 
         Self::launch_heartbeat_thread::<F>(
@@ -57,56 +59,44 @@ impl DetectorController {
     pub fn run_capture_stream(
         &mut self,
         capture_settings: CaptureSetting,
-        dark_maps: Arc<Mutex<HashMap<u32, SLImageRs>>>,
-        defect_map: Arc<Mutex<Option<SLImageRs>>>,
+        correction_maps: CorrectionMaps,
         stop_signal: Arc<AtomicBool>,
     ) -> Result<Pin<Box<dyn Stream<Item = SLImageRs> + Send>>, CaptureError> {
-        let stream = capture_settings
-            .capture_mode
-            .stream_results(capture_settings.exp_time, self.detector.clone(), stop_signal.clone())?;
+        let stream = capture_settings.capture_mode.stream_results(
+            capture_settings.exp_time,
+            self.detector.clone(),
+            stop_signal.clone(),
+        )?;
 
-        let dark_maps_clone = dark_maps.clone();
         let stop_signal_clone = stop_signal.clone();
 
-        Ok(stream.
-            take_while(move |_| {
+        Ok(stream
+            .take_while(move |_| {
                 future::ready(!stop_signal_clone.load(std::sync::atomic::Ordering::Relaxed))
             })
             .map(move |mut image| {
                 if capture_settings.corrected {
-                    if let Some(mut dark_map) = dark_maps_clone
-                        .lock()
-                        .unwrap()
-                        .get_mut(&capture_settings.exp_time)
+                    if correction_maps
+                        .dark_correct_image(&mut image, capture_settings.exp_time)
+                        .is_ok()
                     {
                         info!("Dark Correction Successful");
-                        image.offset_correction(&mut dark_map, 300);
                     } else {
                         error!("Couldn't access dark map");
                     }
 
-                    if let Some(ref mut defect_map) = *defect_map.lock().unwrap() {
-                        info!("Defect correcting");
-                        let mut out_image = SLImageRs::new(image.get_height(), image.get_width());
-
-                        image.defect_correction(&mut out_image, defect_map).unwrap();
-                        out_image
+                    if let Ok(corrected_image) =
+                        correction_maps.defect_correct_image(&mut image, capture_settings.exp_time)
+                    {
+                        return corrected_image;
                     } else {
-                        error!("Couldn't access defect map");
-                        image
+                        return image;
                     }
                 } else {
                     image
                 }
             })
             .boxed())
-    }
-
-    pub fn stop_capture(&mut self) {
-        if let Some(token) = &self.cancellation_token {
-            token.cancel();
-            self.cancellation_token = None;
-        }
     }
 
     fn launch_heartbeat_thread<F>(
@@ -124,15 +114,13 @@ impl DetectorController {
                 let mut detector_status = detector_status_mutex.lock().unwrap();
 
                 match *detector_status {
-                    DetectorStatus::Disconnected => {
-                        match detector.open_camera(BUFFER_DEPTH) {
-                            Ok(_) => {
-                                info!("Connected to device");
-                                *detector_status = DetectorStatus::Available;
-                            },
-                            Err(e) => debug!("Error opening camera")
+                    DetectorStatus::Disconnected => match detector.open_camera(BUFFER_DEPTH) {
+                        Ok(_) => {
+                            info!("Connected to device");
+                            *detector_status = DetectorStatus::Available;
                         }
-                    }
+                        Err(e) => debug!("Error opening camera"),
+                    },
                     DetectorStatus::Available | DetectorStatus::Capturing => {
                         if !detector.is_connected() {
                             info!("Disconnected from device");
@@ -152,11 +140,11 @@ unsafe impl Sync for DetectorController {}
 
 #[cfg(test)]
 mod tests {
+    use crate::capture::types::AdvCapture;
+    use crate::wrapper::{ExposureModes, SLDeviceRS, SLImageRs};
     use std::pin::{self, Pin};
     use std::sync::atomic::AtomicBool;
     use std::sync::{Arc, Mutex};
-    use crate::capture::types::AdvCapture;
-    use crate::wrapper::{ExposureModes, SLDeviceRS, SLImageRs};
 
     use super::DetectorController;
     use async_stream::stream;
@@ -201,7 +189,6 @@ mod tests {
         };
         stream.boxed()
     }
-
 
     /*
     #[tokio::test]

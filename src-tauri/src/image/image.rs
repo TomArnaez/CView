@@ -5,7 +5,7 @@ use crate::charts::charts::ChartSubscriber;
 use crate::image::HistogramEquilisation;
 use crate::utils::serialize_dt;
 use chrono::prelude::{DateTime, Utc};
-use image::{ImageEncoder};
+use image::ImageEncoder;
 use image::{ImageBuffer, Luma};
 use image_lib::{imageops, EncodableLayout};
 use log::info;
@@ -154,6 +154,7 @@ impl ImageStack {
             }
         }
 
+        info!("{:?}", path);
         let mut output_file = File::create(path).unwrap();
         img_file.set_position(0);
         std::io::copy(&mut img_file, &mut output_file).unwrap();
@@ -284,7 +285,12 @@ impl ImageHandler {
         lut
     }
 
-    pub fn get_rgba_image(&self, saturated_pixel_threshold: Option<u32>, size: Option<(u32, u32)>, saturated_color: Option<(u8, u8, u8)>) -> Vec<u8> {
+    pub fn get_rgba_image(
+        &self,
+        saturated_pixel_threshold: Option<u32>,
+        size: Option<(u32, u32)>,
+        saturated_color: Option<&[u8]>,
+    ) -> Vec<u8> {
         println!("{:?}", saturated_pixel_threshold);
         let mut thresholded_image = self.image.clone();
 
@@ -298,10 +304,17 @@ impl ImageHandler {
         };
 
         if let Some(size) = size {
-            thresholded_image = imageops::resize(&thresholded_image, size.0, size.1, imageops::FilterType::Nearest);
+            thresholded_image = imageops::resize(
+                &thresholded_image,
+                size.0,
+                size.1,
+                imageops::FilterType::Nearest,
+            );
         }
 
         let mut data: Vec<u8> = Vec::new();
+
+        let saturated_colors: &[u8] = saturated_color.unwrap_or(&[255, 0, 0]);
 
         for (new_pixel, original) in thresholded_image.iter().zip(self.image.iter()) {
             let mut scaled_value = ((*new_pixel as f32 / 16383.0) * 255.0) as u8;
@@ -311,23 +324,19 @@ impl ImageHandler {
             }
             if let Some(threshold) = saturated_pixel_threshold {
                 if *original > threshold as u16 {
-                    data.push(255);
-                    data.push(0); 
-                    data.push(0); 
-                    data.push(255 as u8); 
+                    data.extend_from_slice(saturated_colors);
+                    data.push(255 as u8);
+                } else {
+                    data.push(scaled_value);
+                    data.push(scaled_value);
+                    data.push(scaled_value);
+                    data.push(255 as u8);
                 }
-                else {
-                    data.push(scaled_value); 
-                    data.push(scaled_value); 
-                    data.push(scaled_value); 
-                    data.push(255 as u8); 
-                }
-            }
-            else {
+            } else {
                 data.push(scaled_value);
-                data.push(scaled_value); 
                 data.push(scaled_value);
-                data.push(255 as u8); 
+                data.push(scaled_value);
+                data.push(255 as u8);
             }
         }
 

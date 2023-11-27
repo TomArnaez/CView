@@ -10,23 +10,29 @@ type ViewerProps = {
   interaction: boolean;
 };
 
-export const Viewer = ({
-  drawMode,
-}: ViewerProps): JSX.Element => {
-  const [imageCanvas, setImageCanvas] = useState<HTMLCanvasElement | null>(null);
-  const [ImageMetadata, setImageMetadata] = useState<ImageMetadata | null>(null);
+export const Viewer = ({ drawMode }: ViewerProps): JSX.Element => {
+  const [imageCanvas, setImageCanvas] = useState<HTMLCanvasElement | null>(
+    null
+  );
+  const [ImageMetadata, setImageMetadata] = useState<ImageMetadata | null>(
+    null
+  );
   const [mousePos, setMousePos] = useState<Point>({ x: 0, y: 0 });
   const [pixelValue, setPixelValue] = useState<number>(0);
-  const { currentImageIdx, currentStackIdx, currentImage, refreshCurrentImage, getCurrentMetadata } = useImageStore(
-    (state) => ({
-      imageStacks: state.imageStacks,
-      currentImage: state.currentImage,
-      currentImageIdx: state.currentImageIndex,
-      currentStackIdx: state.currentStackIndex,
-      refreshCurrentImage: state.refreshCurrentImage,
-      getCurrentMetadata: state.getCurrentMetaData,
-    })
-  );
+  const {
+    currentImageIdx,
+    currentStackIdx,
+    currentImage,
+    refreshCurrentImage,
+    getCurrentMetadata,
+  } = useImageStore((state) => ({
+    imageStacks: state.imageStacks,
+    currentImage: state.currentImage,
+    currentImageIdx: state.currentImageIndex,
+    currentStackIdx: state.currentStackIndex,
+    refreshCurrentImage: state.refreshCurrentImage,
+    getCurrentMetadata: state.getCurrentMetaData,
+  }));
 
   useEffect(() => {
     if (currentImage != null) {
@@ -35,14 +41,20 @@ export const Viewer = ({
       canvas.height = currentImage.height;
       const ctx = canvas.getContext("2d");
       if (ctx != null) {
-        const imageData = ctx.createImageData(currentImage.width, currentImage.height);
+        console.log("test");
+        const imageData = ctx.createImageData(
+          currentImage.width,
+          currentImage.height
+        );
         imageData.data.set(currentImage.data);
         ctx.putImageData(imageData, 0, 0);
         setImageCanvas(canvas);
-        setImageMetadata(getCurrentMetadata());
+        const metadata = getCurrentMetadata();
+        console.log(metadata);
+        setImageMetadata(metadata);
       }
     }
-  }, [currentImage, getCurrentMetadata, setImageCanvas, setImageMetadata])
+  }, [currentImage, getCurrentMetadata, setImageCanvas, setImageMetadata]);
 
   const handleRoiChange = async (annotation: Annotation) => {
     if (currentImageIdx != null && currentStackIdx != null) {
@@ -85,29 +97,29 @@ export const Viewer = ({
 
   return (
     <div style={{ position: "relative", width: "100%", height: "100%" }}>
-    {imageCanvas && (
-      <>
-        <Canvas
-          mode={drawMode}
-          canvasImageSource={imageCanvas}
-          onRoiChange={handleRoiChange}
-          onRotate={handleRotate}
-          onCursorMove={handleCursorMove}
-          onHistogramEquilization={handleHistogramEquilization}
-          onInvertColours={handleInvertColours}
-          onFlip={handleFlip}
-          metadata={ImageMetadata}
-        />
-        {ImageMetadata && (
-          <CanvasOverlay
-            pos={mousePos}
-            adu={pixelValue}
-            imageIdx={currentImageIdx}
+      {imageCanvas && (
+        <>
+          <Canvas
+            mode={drawMode}
+            canvasImageSource={imageCanvas}
+            onRoiChange={handleRoiChange}
+            onRotate={handleRotate}
+            onCursorMove={handleCursorMove}
+            onHistogramEquilization={handleHistogramEquilization}
+            onInvertColours={handleInvertColours}
+            onFlip={handleFlip}
             metadata={ImageMetadata}
           />
-        )}
-      </>
-    )}
+          {ImageMetadata && (
+            <CanvasOverlay
+              pos={mousePos}
+              adu={pixelValue}
+              imageIdx={currentImageIdx}
+              metadata={ImageMetadata}
+            />
+          )}
+        </>
+      )}
     </div>
   );
 };

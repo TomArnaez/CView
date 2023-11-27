@@ -28,7 +28,8 @@ const Overlay = ({ pos, adu, imageIdx, metadata }: OverlayProps) => {
       return (
         <>
           <br />
-          Accumulated Exposure Time: {metadata.extra_info.accumulated_exp_time}ms
+          Accumulated Exposure Time: {metadata.extra_info.accumulated_exp_time}
+          ms
         </>
       );
     }
@@ -56,8 +57,9 @@ const Overlay = ({ pos, adu, imageIdx, metadata }: OverlayProps) => {
         position: "absolute",
         top: 0,
         left: 5,
-        zIndex: 999,
+        zIndex: 10,
         color: "red",
+        fontWeight: 600,
         textAlign: "left",
       }}
     >

@@ -5,13 +5,19 @@ use std::{
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc, Mutex,
-    }, time::Duration,
+    },
+    time::Duration,
 };
 
 use crate::{image::ImageHandler, wrapper::SLImageRs};
 
 use super::{
-    advanced_capture::{DarkMapCapture, LiveCapture, MultiCapture, SignalAccumulationCapture, SmartCapture, DefectMapCapture},
+    advanced_capture::{
+        DarkMapCapture, DefectMapCapture, LiveCapture, MultiCapture, SignalAccumulationCapture,
+        SmartCapture,
+    },
+    capture_manager::CorrectionMaps,
+    corrections::CorrectionError,
     detector::DetectorController,
 };
 use enum_dispatch::enum_dispatch;
@@ -50,15 +56,14 @@ pub enum AdvancedCapture {
     MultiCapture,
     LiveCapture,
     DarkMapCapture,
-    DefectMapCapture
+    DefectMapCapture,
 }
 
 pub enum CaptureStreamItem {
     Image(ImageHandler),
     Progress(CaptureProgress),
-    CaptureResult(Vec<ImageHandler>)
+    CaptureResult(Vec<ImageHandler>),
 }
-
 
 #[derive(Clone, Serialize, Type, Debug)]
 pub struct CaptureProgress {
@@ -67,24 +72,21 @@ pub struct CaptureProgress {
     total_steps: u32,
 }
 
-
 #[enum_dispatch]
 pub trait AdvCapture {
     fn start_stream(
         &self,
-        detector_controller_mutex: Arc<Mutex<DetectorController>>,
-        dark_maps: Arc<Mutex<HashMap<u32, SLImageRs>>>,
-        defect_map: Arc<Mutex<Option<SLImageRs>>>,
+        detector_controller_mutex: DetectorController,
+        correction_maps: &CorrectionMaps,
         stop_signal: Arc<AtomicBool>,
     ) -> Pin<Box<dyn Stream<Item = CaptureStreamItem> + Send>>;
 
     fn check_stop_signal(
         &self,
         stop_signal: &Arc<AtomicBool>,
-        detector_controller: &mut DetectorController,
+        mut detector_controller: &mut DetectorController,
     ) -> bool {
         if stop_signal.load(Ordering::SeqCst) {
-            detector_controller.stop_capture();
             true // Indicating that it should stop
         } else {
             false // Indicating that the capture should continue

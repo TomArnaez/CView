@@ -35,11 +35,12 @@ const listenStreamEvent = async (
   set: SetState<ImageState>
 ): Promise<UnlistenFn> => {
   return events.streamCaptureEvent.listen(async () => {
-    const { saturatedPixelThreshold, saturatedPixelRGBColour } = useAppSettingsStore.getState();
+    const { saturatedPixelThreshold, saturatedPixelRGBColour } =
+      useAppSettingsStore.getState();
     console.log(saturatedPixelRGBColour);
     const data: ArrayBuffer = await invoke("read_stream_buffer", {
       saturatedPixelThreshold,
-      saturatedPixelRgbColour: saturatedPixelRGBColour
+      saturatedPixelRgbColour: saturatedPixelRGBColour,
     });
 
     if (data.byteLength != 0) {
@@ -55,13 +56,14 @@ const setCurrentImageAsync = async (
   stackIdx: number,
   set: SetState<ImageState>
 ) => {
-  const { saturatedPixelThreshold, saturatedPixelRGBColour } = useAppSettingsStore.getState();
+  const { saturatedPixelThreshold, saturatedPixelRGBColour } =
+    useAppSettingsStore.getState();
   const data: ArrayBuffer = await invoke("get_image_binary_rgba", {
     imageIdx,
     stackIdx,
     resize: null,
     saturatedPixelThreshold,
-    saturatedPixelRgbColour: saturatedPixelRGBColour
+    saturatedPixelRgbColour: saturatedPixelRGBColour,
   });
 
   if (data.byteLength != 0) {
@@ -81,11 +83,7 @@ export const useImageStore = create<ImageState>()((set, get) => ({
   _unlistenStream: null,
 
   refreshCurrentImage: () => {
-    setCurrentImageAsync(
-      get().currentImageIndex,
-      get().currentStackIndex,
-      set
-    );
+    setCurrentImageAsync(get().currentImageIndex, get().currentStackIndex, set);
   },
 
   getCurrentMetaData: () => {
@@ -176,17 +174,15 @@ export const useImageStore = create<ImageState>()((set, get) => ({
   setStack: (idx) =>
     set(() => {
       if (!get().streaming) setCurrentImageAsync(0, idx, set);
-      return { currentStackIndex: idx };
+      return { currentStackIndex: idx, currentImageIndex: 0 };
     }),
   setImage: (idx) => set(() => ({ currentImageIndex: idx })),
   updateStacks: (newStacks) => {
-    const lastStackIndex = newStacks.length - 1;
-
     set(() => ({
       imageStacks: newStacks,
-      currentStackIndex: Math.max(0, lastStackIndex),
-      currentImageIndex: 0,
     }));
+
+    get().setStack(Math.max(0, newStacks.length - 1));
   },
   getImageMetaData: (imageIdx, stackIdx) =>
     get().imageStacks[stackIdx].image_handlers[imageIdx].image_metadata,

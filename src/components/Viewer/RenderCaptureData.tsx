@@ -1,4 +1,4 @@
-import { Group, Rect, Text } from "react-konva";
+import { Rect, Text } from "react-konva";
 import { CaptureResultData } from "../../bindings";
 
 export const renderCaptureData = (
@@ -10,7 +10,7 @@ export const renderCaptureData = (
   }
   switch (extraData.type) {
     case "SmartCaptureData":
-      console.log(extraData)
+      console.log(extraData);
       return (
         <>
           <Rect
@@ -21,7 +21,13 @@ export const renderCaptureData = (
             stroke={"blue"}
             strokeWidth={1}
           ></Rect>
-           <Text x={extraData.background_rect.pos.x * sceneScale} y={(extraData.background_rect.pos.y - 10) * sceneScale} text="Background Window" fontSize={7*sceneScale} fill="red"/>        
+          <Text
+            x={extraData.background_rect.pos.x * sceneScale}
+            y={(extraData.background_rect.pos.y - 10) * sceneScale}
+            text="Background Window"
+            fontSize={7 * sceneScale}
+            fill="red"
+          />
           <Rect
             x={extraData.foreground_rect.pos.x * sceneScale}
             y={extraData.foreground_rect.pos.y * sceneScale}
@@ -30,8 +36,14 @@ export const renderCaptureData = (
             stroke={"blue"}
             strokeWidth={1}
           ></Rect>
-            <Text x={extraData.foreground_rect.pos.x * sceneScale} y={(extraData.foreground_rect.pos.y - 10) * sceneScale} text="Foreground Window" fontSize={7*sceneScale} fill="red"/>        
-          </>
+          <Text
+            x={extraData.foreground_rect.pos.x * sceneScale}
+            y={(extraData.foreground_rect.pos.y - 10) * sceneScale}
+            text="Foreground Window"
+            fontSize={7 * sceneScale}
+            fill="red"
+          />
+        </>
       );
     case "SignalAccumulationData": {
       return null;

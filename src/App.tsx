@@ -3,21 +3,17 @@ import {
   AppShell,
   Menu,
   Burger,
-  Button,
   SegmentedControl,
   Modal,
   Flex,
   ActionIcon,
-  Progress,
 } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import {
-  FaBorderStyle,
   FaMousePointer,
   FaLongArrowAltRight,
   FaRegFileImage,
   FaSave,
-  FaLess,
   FaRegSquare,
   FaArrowLeft,
   FaArrowRight,
@@ -30,20 +26,23 @@ import {
   LiveCapture,
   CaptureManagerEventPayload,
   CaptureProgress,
-  CaptureManagerStatus,
 } from "./bindings";
 import CaptureForm from "./components/CaptureForm";
 import { ImageList } from "./components/ImageList";
 import { listen } from "@tauri-apps/api/event";
 import { CaptureSettings } from "./components/CaptureSettings";
-import { camelCaseToWords } from "./utils";
 import { Mode } from "./types/draw";
 import { Viewer } from "./components/Viewer/Viewer";
-import { useImageStore } from "./stores/ImageStore";
+import { useImageStore } from "./stores/imageStore";
 import { GeneralSettingsForm } from "./components/GeneralSettingsForm";
-import { DarkMapGenerationForm } from "./components/DarkMapGenerationForm";
+import useDetectorListener from "./hooks/useDetectorListener";
+import CaptureButton from "./components/Viewer/CaptureButton";
+import StreamButton from "./components/Viewer/StreamButton";
+import ImageListRadix from "./components/ImageList/ImageListRadix";
+import { useAppSettingsStore } from "./stores/appSettingsStore";
 
 function App() {
+  useDetectorListener();
   const [captureProgressModalOpened, setCaptureProgressModalOpened] =
     useState(false);
   const [captureSettingsModalOpened, setCaptureSettingsModalOpened] =
@@ -68,6 +67,10 @@ function App() {
     setStack: state.setStack,
     setImage: state.setImage,
     updateStacks: state.updateStacks,
+  }));
+
+  const { autoSaveCaptures } = useAppSettingsStore((state) => ({
+    autoSaveCaptures: state.autoSaveCaptures,
   }));
 
   const [captureManagerInfo, setCaptureManagerInfo] =
@@ -118,7 +121,6 @@ function App() {
     });
 
     events.captureManagerEvent.listen(async (e) => {
-      console.log(e.payload)
       setCaptureManagerInfo(e.payload);
     });
 
@@ -138,22 +140,7 @@ function App() {
   const handleCapture = async (capture: AdvancedCapture) => {
     setStreaming(true);
     setCaptureSettingsModalOpened(false);
-    await commands.runCapture(capture, true);
-  };
-
-  const handleGoLive = async () => {
-    setStreaming(true);
-    const capture: LiveCapture = {
-      exp_time: 100,
-      type: "LiveCapture",
-    };
-    await commands.runCapture(capture, false);
-  };
-
-  const handleStopLive = async () => {
-    setStreaming(false);
-    setCaptureProgress(null);
-    await commands.stopCapture();
+    await commands.runCapture(capture, autoSaveCaptures);
   };
 
   const handleAdvancedCapture = async () => {
@@ -179,18 +166,10 @@ function App() {
     await commands.generateDefectMap();
   };
 
-  function isCapturingStatus(
-    status: CaptureManagerStatus
-  ): status is { Capturing: AdvancedCapture } {
-    return typeof status === "object" && "Capturing" in status;
-  }
-
   return (
     <>
-      <Modal opened={false} onClose={mapGenerationFormHandlers.close} centered>
-        <DarkMapGenerationForm />
-      </Modal>
       <Modal
+        zIndex={11}
         opened={generalSettingsOpened}
         onClose={generalSettingsHandlers.close}
         centered
@@ -198,6 +177,7 @@ function App() {
         <GeneralSettingsForm />
       </Modal>
       <Modal
+        zIndex={11}
         centered
         opened={captureProgressModalOpened}
         closeOnEscape={false}
@@ -266,18 +246,6 @@ function App() {
                 >
                   Capture Settings
                 </Menu.Item>
-                <Menu.Item
-                  onClick={handleGenerateDarkMaps}
-                  icon={<FaRegFileImage size={14} />}
-                >
-                  Generate Dark Maps
-                </Menu.Item>
-                <Menu.Item
-                  onClick={handleGenerationDefectMap}
-                  icon={<FaRegFileImage size={14} />}
-                >
-                  Generate Defect Map
-                </Menu.Item>
 
                 <Menu.Divider />
 
@@ -286,36 +254,7 @@ function App() {
                 </Menu.Item>
               </Menu.Dropdown>
             </Menu>
-            <Button
-              style={{
-                height: "100%",
-                fontSize: 16
-              }}
-              variant="filled"
-              fullWidth
-              color={captureManagerInfo.status == "Available" ? "blue" : "red"}
-              disabled={captureManagerInfo.status == "DetectorDisconnected"}
-              onClick={handleAdvancedCapture}
-            >
-              {captureManagerInfo.status == "DarkMapsRequired" && (
-                <> Generate Dark Maps </>
-              )}
-              {captureManagerInfo.status == "DefectMapsRequired" && (
-                <> Generate Defect Map </>
-              )}
-              {captureManagerInfo.status == "Available" && (
-                <> Run Advanced Capture </>
-              )}
-              {isCapturingStatus(captureManagerInfo.status) && (
-                <>
-                  Running
-                  {camelCaseToWords(captureManagerInfo.status.Capturing.type)}
-                  <br />
-                  <br />
-                  {captureProgress?.message}
-                </>
-              )}
-            </Button>
+            <CaptureButton onClick={handleAdvancedCapture} />
           </div>
 
           <div
@@ -356,27 +295,7 @@ function App() {
               alignItems: "center",
             }}
           >
-            <Button
-              style={{
-                height: "100%",
-                fontSize: 16
-              }}
-              variant="filled"
-              fullWidth
-              color={live ? "red" : "blue"}
-              disabled={
-                captureManagerInfo.status == "DetectorDisconnected" ||
-                captureManagerInfo.status == "DarkMapsRequired" ||
-                captureManagerInfo.status == "DefectMapsRequired" ||
-                (typeof captureManagerInfo.status === "object" && captureManagerInfo.status.Capturing.type != "LiveCapture")
-              }
-              onClick={() => {
-                live ? handleStopLive() : handleGoLive();
-                setLive(!live);
-              }}
-            >
-                {live ? "Stop Live" : "Go Live"}
-            </Button>
+            <StreamButton />
           </div>
         </AppShell.Header>
 

@@ -2,6 +2,7 @@ use std::{
     collections::HashMap,
     fs,
     path::PathBuf,
+    pin::Pin,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc, Mutex,
@@ -19,7 +20,7 @@ use tauri_specta::Event;
 use crate::{capture::corrections::run_defect_map_gen, wrapper::*};
 
 use super::{
-    advanced_capture::{LiveCapture, DarkMapCapture, DefectMapCapture},
+    advanced_capture::{DarkMapCapture, DefectMapCapture},
     capture::{CaptureError, CaptureSettingBuilder, SequenceCapture},
     detector::{DetectorController, DetectorStatus},
     types::{
@@ -28,12 +29,69 @@ use super::{
     },
 };
 
-pub struct CaptureManager {
-    detector_controller: Arc<Mutex<DetectorController>>,
-    stop_signal: Arc<AtomicBool>,
-    info: Arc<Mutex<CaptureManagerInfo>>,
+#[derive(Clone)]
+pub struct CorrectionMaps {
     dark_maps: Arc<Mutex<HashMap<u32, SLImageRs>>>,
     defect_map: Arc<Mutex<Option<SLImageRs>>>,
+}
+
+impl CorrectionMaps {
+    fn new(dark_maps: HashMap<u32, SLImageRs>, defect_map: Option<SLImageRs>) -> Self {
+        CorrectionMaps {
+            dark_maps: Arc::new(Mutex::new(dark_maps)),
+            defect_map: Arc::new(Mutex::new(defect_map)),
+        }
+    }
+
+    pub fn dark_correct_image(&self, image: &mut SLImageRs, exp_time: u32) -> Result<(), ()> {
+        if let Some(ref mut dark_map) = self.dark_maps.lock().unwrap().get_mut(&exp_time) {
+            image.offset_correction(dark_map, 300);
+            return Ok(());
+        }
+        Err(())
+    }
+
+    pub fn defect_correct_image(
+        &self,
+        image: &mut SLImageRs,
+        exp_time: u32,
+    ) -> Result<(SLImageRs), ()> {
+        if let Some(ref mut defect_map) = *self.defect_map.lock().unwrap() {
+            let mut out_image = SLImageRs::new(image.get_height(), image.get_width());
+            image.defect_correction(&mut out_image, defect_map).unwrap();
+            return Ok(out_image);
+        } else {
+            Err(())
+        }
+    }
+
+    pub fn has_defect_map(&self) -> bool {
+        self.defect_map.lock().unwrap().is_some()
+    }
+
+    pub fn get_dark_map_exp_times(&self) -> Vec<u32> {
+        self.dark_maps
+            .lock()
+            .unwrap()
+            .keys()
+            .cloned()
+            .collect::<Vec<u32>>()
+    }
+
+    fn set_dark_maps(&self, new_dark_maps: HashMap<u32, SLImageRs>) {
+        *self.dark_maps.lock().unwrap() = new_dark_maps;
+    }
+
+    fn set_defect_map(&mut self, defect_map: SLImageRs) {
+        *self.defect_map.lock().unwrap() = Some(defect_map);
+    }
+}
+
+pub struct CaptureManager {
+    detector_controller: DetectorController,
+    stop_signal: Arc<AtomicBool>,
+    info: Arc<Mutex<CaptureManagerInfo>>,
+    correction_maps: CorrectionMaps,
     dark_map_path: PathBuf,
     defect_map_path: PathBuf,
 }
@@ -48,10 +106,10 @@ impl CaptureManager {
         fs::create_dir(&dark_map_path);
         fs::create_dir(&defect_map_path);
 
-        let dark_maps = Arc::new(Mutex::new(read_dark_maps(&dark_map_path)));
-        let defect_map = Arc::new(Mutex::new(read_defect_map(
-            &defect_map_path.join("GlobalDefectMap.tif"),
-        )));
+        let dark_maps = read_dark_maps(&dark_map_path);
+        let defect_map = read_defect_map(&defect_map_path.join("GlobalDefectMap.tif"));
+
+        let correction_maps = CorrectionMaps::new(dark_maps, defect_map);
 
         let info = Arc::new(Mutex::new(CaptureManagerInfo {
             status: CaptureManagerStatus::DetectorDisconnected,
@@ -60,49 +118,134 @@ impl CaptureManager {
 
         let detector_controller = DetectorController::new(Self::create_detector_callback(
             app.clone(),
-            dark_maps.clone(),
-            defect_map.clone(),
+            correction_maps.clone(),
             info.clone(),
         ));
 
         Self {
-            detector_controller: Arc::new(Mutex::new(detector_controller)),
+            detector_controller: detector_controller,
             stop_signal: Arc::new(AtomicBool::new(false)),
             info,
-            dark_maps,
-            defect_map,
+            correction_maps,
             dark_map_path,
             defect_map_path,
         }
     }
 
-    pub fn generate_dark_maps<T: Runtime>(&self, app: AppHandle<T>,
-        exp_times: Vec<u32>, num_frames: u32) {
-        self.info.lock().unwrap().status =
-        CaptureManagerStatus::Capturing(AdvancedCapture::DarkMapCapture(DarkMapCapture {
-            exp_times: vec![100, 200],
-            frames_per_capture: 10
-        }));
-        self.emit_event(app.clone());
+    /*
+    pub fn generate_corrections(
+        &mut self,
+        exp_times: Vec<u32>,
+        num_frames: u32,
+    ) ->  Pin<Box<dyn Stream<Item = CaptureStreamItem> + Send>>{
+        self.dark_maps.lock().unwrap().clear();
 
-
-        let detector_controller = self.detector_controller.clone();
         let dark_maps = self.dark_maps.clone();
         let dark_map_path = self.dark_map_path.clone();
         let defect_map = self.defect_map.clone();
-        let info = self.info.clone();
         let stop_signal_clone: Arc<AtomicBool> = self.stop_signal.clone();
 
+
+        let streams = exp_times.iter().map(|&exp_time| {
+            let dark_map_path: PathBuf = dark_map_path.clone();
+            let dark_maps_clone = dark_maps.clone();
+            let dark_map_path = dark_map_path.clone();
+            let defect_map: Arc<Mutex<Option<SLImageRs>>> = defect_map.clone();
+            let stop_signal_clone: Arc<AtomicBool> = stop_signal_clone.clone();
+
+            let capture_settings =
+                CaptureSettingBuilder::new(exp_time, Box::new(SequenceCapture { num_frames }))
+                    .corrected(false)
+                    .build();
+
+            let mut stream = self
+                .detector_controller
+                .run_capture_stream(
+                    capture_settings,
+                    dark_maps_clone,
+                    defect_map,
+                    stop_signal_clone
+                )
+                .unwrap();
+
+            let dark_maps = dark_maps.clone();
+
+            let new_stream = stream! {
+                let mut i = 0;
+                let avg_image = Arc::new(Mutex::new(SLImageRs::new_depth(1536, 1031, num_frames)));
+
+                let avg_image_clone = avg_image.clone();
+                while let Some(mut stream_item) = stream.next().await {
+                    unsafe {
+                        std::ptr::copy_nonoverlapping(
+                        stream_item.get_data_pointer(0),
+                        avg_image_clone.lock().unwrap().get_data_pointer(i),
+                        (stream_item.get_width() * stream_item.get_height() * 2) as usize,
+                    );
+                    i+= 1;
+                }
+                }
+
+                let mut average_image = avg_image.lock().unwrap().get_average_image();
+
+                average_image
+                    .write_tiff_image(&dark_map_path.join(format!("DarkMap_{exp_time}ms.tif")))
+                    .unwrap();
+
+                dark_maps
+                    .lock()
+                    .unwrap()
+                    .insert(exp_time, average_image);
+
+                yield CaptureStreamItem::Progress(CaptureProgress::new(
+                    0,
+                    "Generating Defect Maps".to_string(),
+                ))
+            };
+
+
+            return new_stream;
+    }).collect::<Vec<_>>();
+
+        let mut stream = stream::iter(streams).flatten().boxed();
+
+        let new_stream = stream! {
+            while let Some(stream_item) = stream.next().await {
+                yield stream_item;
+            }
+        };
+
+        return Box::pin(new_stream);
+    }
+    */
+
+    pub fn generate_dark_maps<T: Runtime>(
+        &self,
+        app: AppHandle<T>,
+        exp_times: Vec<u32>,
+        num_frames: u32,
+    ) {
+        self.info.lock().unwrap().status =
+            CaptureManagerStatus::Capturing(AdvancedCapture::DarkMapCapture(DarkMapCapture {
+                exp_times: vec![100, 200],
+                frames_per_capture: 10,
+            }));
+        self.emit_event(app.clone());
+
+        let detector_controller = self.detector_controller.clone();
+        let dark_map_path = self.dark_map_path.clone();
+        let info = self.info.clone();
+        let stop_signal_clone: Arc<AtomicBool> = self.stop_signal.clone();
+        let correction_maps = self.correction_maps.clone();
 
         tauri::async_runtime::spawn(async move {
             stream::iter(exp_times)
                 .then(|exp_time| {
                     let dark_map_path: PathBuf = dark_map_path.clone();
-                    let dark_maps = dark_maps.clone();
-                    let detector_controller = detector_controller.clone();
+                    let mut detector_controller = detector_controller.clone();
                     let dark_map_path = dark_map_path.clone();
-                    let defect_map: Arc<Mutex<Option<SLImageRs>>> = defect_map.clone();
                     let stop_signal_clone: Arc<AtomicBool> = stop_signal_clone.clone();
+                    let correction_maps = correction_maps.clone();
 
                     async move {
                         let capture_settings = CaptureSettingBuilder::new(
@@ -115,12 +258,9 @@ impl CaptureManager {
                         let mut average_image = SLImageRs::new_depth(1536, 1031, num_frames);
 
                         let mut enumerated_stream = detector_controller
-                            .lock()
-                            .unwrap()
                             .run_capture_stream(
                                 capture_settings.clone(),
-                                dark_maps.clone(),
-                                defect_map.clone(),
+                                correction_maps,
                                 stop_signal_clone,
                             )
                             .expect("Failed to run capture stream")
@@ -143,8 +283,6 @@ impl CaptureManager {
                                 &dark_map_path.join(format!("DarkMap_{exp_time}ms.tif")),
                             )
                             .unwrap();
-
-                        dark_maps.lock().unwrap().insert(exp_time, average_image);
                     }
                 })
                 .collect::<Vec<_>>()
@@ -155,7 +293,7 @@ impl CaptureManager {
     }
 
     pub fn generate_defect_map<T: Runtime>(
-        &self,
+        &mut self,
         app: AppHandle<T>,
         dark_exp_times: Vec<u32>,
         num_frames: u32,
@@ -163,16 +301,15 @@ impl CaptureManager {
         self.info.lock().unwrap().status =
             CaptureManagerStatus::Capturing(AdvancedCapture::DefectMapCapture(DefectMapCapture {
                 exp_times: vec![100, 200],
-                frames_per_capture: 10
+                frames_per_capture: 10,
             }));
 
         self.emit_event(app.clone());
 
-        let detector_controller = self.detector_controller.clone();
-        let dark_maps = self.dark_maps.clone();
-        let defect_map = self.defect_map.clone();
         let defect_map_path = self.defect_map_path.clone();
         let info = self.info.clone();
+        let correction_maps = self.correction_maps.clone();
+        let detector_controller = self.detector_controller.clone();
 
         let stop_signal_clone: Arc<AtomicBool> = self.stop_signal.clone();
         tauri::async_runtime::spawn(async move {
@@ -194,11 +331,10 @@ impl CaptureManager {
                     )
                 })
                 .then(|(exp_time, full_well_mode)| {
-                    let detector_controller = detector_controller.clone();
-                    let defect_map = defect_map.clone();
+                    let correction_maps = correction_maps.clone();
                     let defect_map_path = defect_map_path.clone();
-                    let dark_maps = dark_maps.clone();
                     let stop_signal_clone: Arc<AtomicBool> = stop_signal_clone.clone();
+                    let mut detector_controller = detector_controller.clone();
 
                     async move {
                         let capture_settings = CaptureSettingBuilder::new(
@@ -212,12 +348,9 @@ impl CaptureManager {
                         let mut average_image = SLImageRs::new_depth(1536, 1031, num_frames);
 
                         let mut enumerated_stream = detector_controller
-                            .lock()
-                            .unwrap()
                             .run_capture_stream(
                                 capture_settings.clone(),
-                                dark_maps,
-                                defect_map,
+                                correction_maps,
                                 stop_signal_clone,
                             )
                             .expect("Failed to run capture stream")
@@ -255,7 +388,6 @@ impl CaptureManager {
             if let Ok(defect_map_path) = run_defect_map_gen(&images_dir, &exe_dir) {
                 let mut defect_map_image = SLImageRs::new(1, 1);
                 if defect_map_image.read_tiff_image(&defect_map_path).is_ok() {
-                    *defect_map.lock().unwrap() = Some(defect_map_image);
                     info!("Set new defect map");
                 }
             } else {
@@ -268,8 +400,7 @@ impl CaptureManager {
 
     fn create_detector_callback<T: Runtime>(
         app: AppHandle<T>,
-        dark_maps: Arc<Mutex<HashMap<u32, SLImageRs>>>,
-        defect_map: Arc<Mutex<Option<SLImageRs>>>,
+        correction_maps: CorrectionMaps,
         info: Arc<Mutex<CaptureManagerInfo>>,
     ) -> impl FnMut(DetectorStatus) {
         move |status| {
@@ -278,9 +409,9 @@ impl CaptureManager {
                 DetectorStatus::Available => {
                     if matches!(info.status, CaptureManagerStatus::Capturing(_)) {
                     } else {
-                        if dark_maps.lock().unwrap().len() == 0 {
+                        if correction_maps.get_dark_map_exp_times().len() == 0 {
                             info.status = CaptureManagerStatus::DarkMapsRequired
-                        } else if defect_map.lock().unwrap().is_none() {
+                        } else if !correction_maps.has_defect_map() {
                             info.status = CaptureManagerStatus::DefectMapsRequired
                         } else {
                             info.status = CaptureManagerStatus::Available;
@@ -293,12 +424,7 @@ impl CaptureManager {
                 _ => {}
             }
 
-            let mut exposure_times = dark_maps
-                .lock()
-                .unwrap()
-                .keys()
-                .cloned()
-                .collect::<Vec<u32>>();
+            let mut exposure_times = correction_maps.get_dark_map_exp_times();
 
             exposure_times.sort();
 
@@ -349,8 +475,7 @@ impl CaptureManager {
 
         let stream = capture.start_stream(
             self.detector_controller.clone(),
-            self.dark_maps.clone(),
-            self.defect_map.clone(),
+            &self.correction_maps,
             self.stop_signal.clone(),
         );
 
@@ -363,7 +488,7 @@ impl CaptureManager {
 
     fn emit_event<T: Runtime>(&self, app: AppHandle<T>) {
         CaptureManagerEvent(CaptureManagerEventPayload {
-            dark_maps: self.dark_maps.lock().unwrap().keys().cloned().collect(),
+            dark_maps: self.correction_maps.get_dark_map_exp_times(),
             status: self.info.lock().unwrap().status.clone(),
         })
         .emit_all(&app)

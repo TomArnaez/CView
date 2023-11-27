@@ -49,7 +49,7 @@ impl StreamBuffer {
     fn new(size: usize) -> StreamBuffer {
         let buffer = StreamBuffer {
             q: ConcurrentQueue::<ImageHandler>::bounded(size),
-            size
+            size,
         };
         buffer
     }
@@ -101,6 +101,9 @@ fn main() {
                 .targets([
                     Target::new(TargetKind::Stdout),
                     Target::new(TargetKind::Webview),
+                    Target::new(TargetKind::LogDir {
+                        file_name: Some("CView_log".to_string()),
+                    }),
                 ])
                 .with_colors(ColoredLevelConfig::default())
                 .build(),
