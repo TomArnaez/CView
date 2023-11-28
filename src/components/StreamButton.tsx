@@ -1,8 +1,7 @@
-import { stat } from "fs/promises";
-import { LiveCapture, commands } from "../../bindings";
-import { useDetectorStore } from "../../stores/detectorStore";
-import { useImageStore } from "../../stores/imageStore";
-import { isCapturingStatus } from "../../utils";
+import { LiveCapture, commands } from "../bindings";
+import { useDetectorStore } from "../stores/detectorStore";
+import { useImageStore } from "../stores/imageStore";
+import { isCapturingStatus } from "../utils";
 
 const StreamButton = () => {
   const { status } = useDetectorStore((state) => ({

@@ -2,10 +2,9 @@ use std::{
     collections::HashMap,
     fs,
     path::PathBuf,
-    pin::Pin,
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc, Mutex,
+        Arc, Mutex, mpsc,
     },
 };
 
@@ -471,11 +470,14 @@ impl CaptureManager {
         self.info.lock().unwrap().status = CaptureManagerStatus::Capturing(capture.clone());
         self.emit_event(app.clone());
 
+
         self.stop_signal.store(false, Ordering::SeqCst);
+        let (progress_tx, mut progress_rx) = mpsc::channel();
 
         let stream = capture.start_stream(
             self.detector_controller.clone(),
             &self.correction_maps,
+            progress_tx,
             self.stop_signal.clone(),
         );
 

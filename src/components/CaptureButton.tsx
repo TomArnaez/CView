@@ -1,5 +1,5 @@
-import { useDetectorStore } from "../../stores/detectorStore";
-import { camelCaseToWords, isCapturingStatus } from "../../utils";
+import { useDetectorStore } from "../stores/detectorStore";
+import { camelCaseToWords, isCapturingStatus } from "../utils";
 
 interface CaptureButtonProps {
   onClick: () => void;
@@ -14,8 +14,6 @@ const CaptureButton = ({ onClick }: CaptureButtonProps) => {
   const isDisabled =
     status === "DetectorDisconnected" ||
     (typeof status === "object" && status.Capturing.type == "LiveCapture");
-
-  console.log(isDisabled);
 
   const buttonClass = `relative text-lg px-4 py-2 font-semibold rounded ${
     isDisabled

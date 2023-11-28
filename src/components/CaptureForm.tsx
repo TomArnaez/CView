@@ -1,5 +1,4 @@
 import { Button, Progress, Flex, Center, Text } from "@mantine/core";
-import { Carousel } from "@mantine/carousel";
 import { emit, listen } from "@tauri-apps/api/event";
 import { useState, useEffect } from "react";
 
@@ -39,7 +38,6 @@ const CaptureForm = ({ setFormOpen }: CaptureFormProps): JSX.Element => {
 
   return (
     <Flex direction="column" gap="md">
-      <Carousel maw={400} mx="" withIndicators height={200}></Carousel>
       <Center>
         <Text>{captureMessage}</Text>
       </Center>

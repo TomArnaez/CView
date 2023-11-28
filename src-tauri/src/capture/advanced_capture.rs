@@ -13,14 +13,14 @@ use async_stream::stream;
 use futures::stream::{self, StreamExt};
 
 use futures_core::Stream;
-use log::info;
+use log::{info, error};
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use std::{
     pin::Pin,
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc, Mutex,
+        Arc, Mutex, mpsc::Sender,
     },
 };
 
@@ -70,6 +70,7 @@ impl AdvCapture for DarkMapCapture {
         &self,
         detector_controller_mutex: DetectorController,
         correction_maps: &CorrectionMaps,
+        mut progress_tx: Sender<CaptureProgress>,
         stop_signal: Arc<AtomicBool>,
     ) -> Pin<Box<dyn Stream<Item = CaptureStreamItem> + Send>> {
         let stream = stream! { yield CaptureStreamItem::Progress(CaptureProgress::new(0, "test".to_string())) };
@@ -82,6 +83,7 @@ impl AdvCapture for DefectMapCapture {
         &self,
         detector_controller_mutex: DetectorController,
         correction_maps: &CorrectionMaps,
+        mut progress_tx: Sender<CaptureProgress>,
         stop_signal: Arc<AtomicBool>,
     ) -> Pin<Box<dyn Stream<Item = CaptureStreamItem> + Send>> {
         let stream = stream! { yield CaptureStreamItem::Progress(CaptureProgress::new(0, "test".to_string())) };
@@ -94,6 +96,7 @@ impl AdvCapture for LiveCapture {
         &self,
         mut detector_controller: DetectorController,
         correction_maps: &CorrectionMaps,
+        mut progress_tx: Sender<CaptureProgress>,
         stop_signal: Arc<AtomicBool>,
     ) -> Pin<Box<dyn Stream<Item = CaptureStreamItem> + Send>> {
         info!("Starting Live Capture");
@@ -131,6 +134,7 @@ impl AdvCapture for SmartCapture {
         &self,
         mut detector_controller: DetectorController,
         correction_maps: &CorrectionMaps,
+        progress_tx: Sender<CaptureProgress>,
         stop_signal: Arc<AtomicBool>,
     ) -> Pin<Box<dyn Stream<Item = CaptureStreamItem> + Send>> {
         info!("Starting Smart Capture");
@@ -148,6 +152,12 @@ impl AdvCapture for SmartCapture {
             .iter()
             .map(|&exp_time| {
                 let capture_progress = capture_progress.clone();
+
+                match progress_tx.send(CaptureProgress::new(1000, "Test".to_owned())) {
+                    Ok(_) => {},
+                    Err(e) => error!("Failed to send progress update: {}", e),
+                }
+
                 let capture_settings = CaptureSettingBuilder::new(
                     exp_time,
                     Box::new(SequenceCapture {
@@ -159,42 +169,36 @@ impl AdvCapture for SmartCapture {
                 let window_size = self.window_size;
                 let best_capture = best_capture.clone();
 
-                stream::once(async move {
-                    CaptureStreamItem::Progress(capture_progress.lock().unwrap().update(
-                        format!("Capturing images for exposure time {exp_time}ms").to_string(),
-                    ))
-                })
-                .chain(
-                    detector_controller
-                        .run_capture_stream(
-                            capture_settings.clone(),
-                            correction_maps.clone(),
-                            stop_signal.clone(),
-                        )
-                        .expect("Failed to run capture stream")
-                        .map(move |mut image| {
-                            let image_buffer = image.to_image_buffer();
-                            let snr_results = snr_threaded(&image_buffer, window_size).unwrap();
-                            let image_metadata = ImageMetadataBuilder::new()
-                                .capture_settings(capture_settings.clone())
-                                .extra_info(CaptureResultData::SmartCaptureData(SmartCaptureData {
-                                    signal_noise_ratio: snr_results.0.clone(),
-                                    background_rect: snr_results.1.clone(),
-                                    foreground_rect: snr_results.2.clone(),
-                                }))
-                                .build();
+                detector_controller
+                    .run_capture_stream(
+                        capture_settings.clone(),
+                        correction_maps.clone(),
+                        stop_signal.clone(),
+                    )
+                    .expect("Failed to run capture stream")
+                    .map(move |mut image| {
+                        let image_buffer = image.to_image_buffer();
+                        let snr_results = snr_threaded(&image_buffer, window_size).unwrap();
+                        let image_metadata = ImageMetadataBuilder::new()
+                            .capture_settings(capture_settings.clone())
+                            .extra_info(CaptureResultData::SmartCaptureData(SmartCaptureData {
+                                signal_noise_ratio: snr_results.0.clone(),
+                                background_rect: snr_results.1.clone(),
+                                foreground_rect: snr_results.2.clone(),
+                            }))
+                            .build();
 
-                            let mut image_handler = ImageHandler::new(image_buffer, image_metadata);
+                        let mut image_handler = ImageHandler::new(image_buffer, image_metadata);
 
-                            image_handler.apply_histogram_equilization();
+                        image_handler.apply_histogram_equilization();
 
-                            let mut best = best_capture.lock().unwrap();
-                            if snr_results.0 > best.1 {
-                                *best = (Some(image_handler.clone()), snr_results.0);
-                            }
+                        let mut best = best_capture.lock().unwrap();
+                        if snr_results.0 > best.1 {
+                            *best = (Some(image_handler.clone()), snr_results.0);
+                        }
 
-                            CaptureStreamItem::Image(image_handler)
-                        }),
+                        CaptureStreamItem::Image(image_handler)
+                    },
                 )
             })
             .collect::<Vec<_>>();
@@ -227,6 +231,7 @@ impl AdvCapture for SignalAccumulationCapture {
         &self,
         mut detector_controller: DetectorController,
         correction_maps: &CorrectionMaps,
+        mut progress_tx: Sender<CaptureProgress>,
         stop_signal: Arc<AtomicBool>,
     ) -> Pin<Box<dyn Stream<Item = CaptureStreamItem> + Send>> {
         const MAX_PIXEL_VALUE: u16 = 16383;
@@ -333,6 +338,7 @@ impl AdvCapture for MultiCapture {
         &self,
         mut detector_controller: DetectorController,
         correction_maps: &CorrectionMaps,
+        mut progress_tx: Sender<CaptureProgress>,
         stop_signal: Arc<AtomicBool>,
     ) -> Pin<Box<dyn Stream<Item = CaptureStreamItem> + Send>> {
         info!("Starting Multi Capture");
@@ -369,7 +375,7 @@ impl AdvCapture for MultiCapture {
                 let capture_stream = detector_controller
                     .run_capture_stream(
                         capture_settings.clone(),
-                        correction_maps,
+                        correction_maps.clone(),
                         stop_signal.clone(),
                     )
                     .expect("Failed to run capture stream")

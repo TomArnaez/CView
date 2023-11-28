@@ -68,8 +68,6 @@ pub async fn run_capture(
     }
 
     if let Some(capture_result) = capture_result {
-        info!("got capture result");
-
         let timestamp = Utc::now();
 
         let image_stack = ImageStack {

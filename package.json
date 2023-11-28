@@ -13,7 +13,6 @@
   },
   "dependencies": {
     "@headlessui/react": "^1.7.17",
-    "@mantine/carousel": "^7.1.2",
     "@mantine/core": "^7.1.2",
     "@mantine/form": "^7.2.2",
     "@mantine/hooks": "^7.1.2",
@@ -35,6 +34,7 @@
     "react-icons": "^4.10.1",
     "react-konva": "^18.2.10",
     "recharts": "^2.9.3",
+    "swiper": "^11.0.5",
     "tauri-plugin-log-api": "github:tauri-apps/tauri-plugin-log",
     "vite-plugin-comlink": "^3.0.2",
     "zustand": "^4.4.6"

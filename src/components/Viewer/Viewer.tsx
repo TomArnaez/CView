@@ -4,6 +4,7 @@ import Canvas from "./Canvas";
 import { Mode } from "../../types/draw";
 import CanvasOverlay from "./Overlay";
 import { useImageStore } from "../../stores/imageStore";
+import Carousel from "./Carousel";
 
 type ViewerProps = {
   drawMode: Mode;
@@ -96,9 +97,12 @@ export const Viewer = ({ drawMode }: ViewerProps): JSX.Element => {
   };
 
   return (
-    <div style={{ position: "relative", width: "100%", height: "100%" }}>
+    <div className="flex flex-col w-full h-full relative">
       {imageCanvas && (
-        <>
+        <div
+          className="flex flex-grow flex-shrink-0"
+          style={{ flexBasis: "80%" }}
+        >
           <Canvas
             mode={drawMode}
             canvasImageSource={imageCanvas}
@@ -118,8 +122,14 @@ export const Viewer = ({ drawMode }: ViewerProps): JSX.Element => {
               metadata={ImageMetadata}
             />
           )}
-        </>
+        </div>
       )}
+      <div
+        className="flex flex-grow flex-shrink-0"
+        style={{ flexBasis: "20%" }}
+      >
+        <Carousel />
+      </div>
     </div>
   );
 };

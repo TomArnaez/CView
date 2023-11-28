@@ -36,8 +36,8 @@ import { Viewer } from "./components/Viewer/Viewer";
 import { useImageStore } from "./stores/imageStore";
 import { GeneralSettingsForm } from "./components/GeneralSettingsForm";
 import useDetectorListener from "./hooks/useDetectorListener";
-import CaptureButton from "./components/Viewer/CaptureButton";
-import StreamButton from "./components/Viewer/StreamButton";
+import CaptureButton from "./components/CaptureButton";
+import StreamButton from "./components/StreamButton";
 import ImageListRadix from "./components/ImageList/ImageListRadix";
 import { useAppSettingsStore } from "./stores/appSettingsStore";
 

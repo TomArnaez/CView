@@ -85,7 +85,7 @@ histogramEvent: "plugin:tauri-specta:histogram-event"
 /** user-defined types **/
 
 export type AdvancedCapture = ({ type: "SmartCapture" } & SmartCapture) | ({ type: "SignalAccumulationCapture" } & SignalAccumulation) | ({ type: "MultiCapture" } & MultiCapture) | ({ type: "LiveCapture" } & LiveCapture) | ({ type: "DarkMapCapture" } & DarkMapCapture) | ({ type: "DefectMapCapture" } & DefectMapCapture)
-export type Annotation = { Rect: Rect } | { Line: Line }
+export type Annotation = ({ type: "Rect" } & Rect) | ({ type: "Line" } & Line)
 export type BinningModesRS = RemoteBinningModes
 export type CancelCaptureEvent = []
 export type CaptureManagerEvent = CaptureManagerEventPayload
@@ -130,7 +130,7 @@ export type StreamCaptureEvent = []
 
          import { invoke as TAURI_INVOKE } from "@tauri-apps/api/primitives";
 import * as TAURI_API_EVENT from "@tauri-apps/api/event";
-import { type Window as __Window__ } from "@tauri-apps/api/window";
+import { type Window as __WebviewWindowHandle__ } from "@tauri-apps/api/window";
 
 type __EventObj__<T> = {
   listen: (
@@ -154,7 +154,7 @@ function __makeEvents__<T extends Record<string, any>>(
   return new Proxy(
     {} as unknown as {
       [K in keyof T]: __EventObj__<T[K]> & {
-        (handle: __Window__): __EventObj__<T[K]>;
+        (handle: __WebviewWindowHandle__): __EventObj__<T[K]>;
       };
     },
     {

@@ -32,6 +32,7 @@ pub struct Line {
 
 #[enum_dispatch(DataExtractor)]
 #[derive(Serialize, Deserialize, Type, Clone, Debug)]
+#[serde(tag = "type")]
 pub enum Annotation {
     Rect(Rect),
     Line(Line),

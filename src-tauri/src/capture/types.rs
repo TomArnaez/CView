@@ -1,15 +1,12 @@
 use std::{
-    collections::HashMap,
-    path::PathBuf,
     pin::Pin,
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc, Mutex,
+        Arc, mpsc::{self, Sender}
     },
-    time::Duration,
 };
 
-use crate::{image::ImageHandler, wrapper::SLImageRs};
+use crate::image::ImageHandler;
 
 use super::{
     advanced_capture::{
@@ -17,14 +14,13 @@ use super::{
         SmartCapture,
     },
     capture_manager::CorrectionMaps,
-    corrections::CorrectionError,
     detector::DetectorController,
 };
+
 use enum_dispatch::enum_dispatch;
 use futures_core::Stream;
 use serde::{Deserialize, Serialize};
 use specta::Type;
-use tauri::{AppHandle, Runtime};
 use tauri_specta::Event;
 
 #[derive(Type, Serialize, Debug, Clone)]
@@ -78,13 +74,14 @@ pub trait AdvCapture {
         &self,
         detector_controller_mutex: DetectorController,
         correction_maps: &CorrectionMaps,
+        progress_tx: Sender<CaptureProgress>,
         stop_signal: Arc<AtomicBool>,
     ) -> Pin<Box<dyn Stream<Item = CaptureStreamItem> + Send>>;
 
     fn check_stop_signal(
         &self,
         stop_signal: &Arc<AtomicBool>,
-        mut detector_controller: &mut DetectorController,
+        detector_controller: &mut DetectorController,
     ) -> bool {
         if stop_signal.load(Ordering::SeqCst) {
             true // Indicating that it should stop

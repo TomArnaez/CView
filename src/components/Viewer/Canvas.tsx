@@ -6,6 +6,7 @@ import {
   Group,
   Rect as KonvaRect,
   Line as KonvaLine,
+  Transformer,
 } from "react-konva";
 import { FaChartBar, FaChartLine, FaRegEye } from "react-icons/fa";
 import Konva from "konva";
@@ -16,7 +17,8 @@ import { useContextMenu } from "mantine-contextmenu";
 import classes from "../../css/master.module.css";
 import { createChartWindow } from "../../utils/WindowCreation";
 import { renderCaptureData } from "./RenderCaptureData";
-import { useImageStore } from "../../stores/ImageStore";
+import { useImageStore } from "../../stores/imageStore";
+import React from "react";
 
 interface CanvasProps {
   mode: Mode;
@@ -49,12 +51,17 @@ const Canvas = ({
   const [sceneWidth, setSceneWidth] = useState<number>(500);
   const [scenePos, setScenePos] = useState({ x: 0, y: 0 });
   const [prevMousePos, setPrevMousePos] = useState({ x: 0, y: 0 });
-  const [newAnnotation, setNewAnnotation] = useState<Annotation>();
   const [sceneMousePos, setSceneMousePos] = useState({ x: 0, y: 0 });
-  const [drawingAnnotation, setDrawingAnnotation] = useState<boolean>(false);
   const [zoomScale, setZoomScale] = useState<number>(1.0);
   const [stageX, setStageX] = useState<number>(0.0);
   const [stageY, setStageY] = useState<number>(0.0);
+
+  const [annotations, setAnnotations] = useState<Annotation[]>([]);
+  const [drawingAnnotation, setDrawingAnnotation] = useState<boolean>(false);
+  const [newAnnotation, setNewAnnotation] = useState<Annotation | null>(null);
+  const [selectedAnnotationIndex, setSelectedAnnotationIndex] = useState<number | null>(null);
+  const transformerRef = useRef<Konva.Transformer>(null);
+
 
   const { currentImageIdx, currentStackIdx } = useImageStore((state) => ({
     currentImageIdx: state.currentImageIndex,
@@ -65,7 +72,7 @@ const Canvas = ({
     if (canvasImageSource != null) {
       createChartWindow("Histogram", currentImageIdx, currentStackIdx);
     }
-  }, [canvasImageSource, currentImageIdx, currentStackIdx]); 
+  }, [canvasImageSource, currentImageIdx, currentStackIdx]);
 
   const handleShowLineProfileChart = useCallback(() => {
     if (canvasImageSource != null) {
@@ -93,9 +100,25 @@ const Canvas = ({
           onHistogramEquilization();
           break;
         }
+        case "a": {
+          if (newAnnotation != null) {
+            setAnnotations((prevAnnotations) => [
+              ...prevAnnotations,
+              newAnnotation,
+            ]);
+            setNewAnnotation(null);
+          }
+        }
       }
     },
-    [handleShowLineProfileChart, handleShowHistogramChart, onInvertColours, onHistogramEquilization]
+    [
+      handleShowLineProfileChart,
+      handleShowHistogramChart,
+      onInvertColours,
+      onHistogramEquilization,
+      newAnnotation,
+      annotations,
+    ]
   );
 
   useEffect(() => {
@@ -117,8 +140,6 @@ const Canvas = ({
 
       setStageWidth(newStageWidth);
       setStageHeight(newStageHeight);
-      console.log("element sizes", element.offsetHeight, element.offsetWidth);
-      console.log("stage sizes", newStageHeight, newStageWidth);
 
       const scaleX = newStageWidth / sceneWidth;
       const scaleY = newStageHeight / sceneHeight;
@@ -207,20 +228,18 @@ const Canvas = ({
 
       if (mode == Mode.LineMode) {
         const annotation: Annotation = {
-          Line: {
-            start: { x: Math.floor(x), y: Math.floor(y) },
-            finish: { x: Math.floor(x), y: Math.floor(y) },
-          },
+          type: "Line",
+          start: { x: Math.floor(x), y: Math.floor(y) },
+          finish: { x: Math.floor(x), y: Math.floor(y) },
         };
         setNewAnnotation(annotation);
         setDrawingAnnotation(true);
       } else if (mode == Mode.RectangleMode) {
         const annotation: Annotation = {
-          Rect: {
-            width: 0,
-            height: 0,
-            pos: { x: Math.floor(x), y: Math.floor(y) },
-          },
+          type: "Rect",
+          width: 0,
+          height: 0,
+          pos: { x: Math.floor(x), y: Math.floor(y) },
         };
         setNewAnnotation(annotation);
         setDrawingAnnotation(true);
@@ -239,8 +258,8 @@ const Canvas = ({
     });
 
     if (drawingAnnotation && newAnnotation != null) {
-      if ("Rect" in newAnnotation) {
-        const originalPos = newAnnotation.Rect.pos;
+      if (newAnnotation.type == "Rect") {
+        const originalPos = newAnnotation.pos;
         const topLeft: Point = {
           x: Math.min(newPos.x, originalPos.x),
           y: Math.min(newPos.y, originalPos.y),
@@ -249,48 +268,57 @@ const Canvas = ({
           x: Math.max(newPos.x, originalPos.x),
           y: Math.max(newPos.y, originalPos.y),
         };
-        newAnnotation.Rect = {
-          width: bottomRight.x - topLeft.x,
-          height: bottomRight.y - topLeft.y,
-          pos: topLeft,
-        };
+        newAnnotation.width = bottomRight.x - topLeft.x;
+        newAnnotation.height = bottomRight.y - topLeft.y;
+        newAnnotation.pos = topLeft;
       }
-      if ("Line" in newAnnotation) {
-        newAnnotation.Line.finish = { x: Math.floor(x), y: Math.floor(y) };
+      if (newAnnotation.type == "Line") {
+        newAnnotation.finish = { x: Math.floor(x), y: Math.floor(y) };
       }
       await onRoiChange(newAnnotation);
     }
   };
 
-  const getAnnotationComponent = () => {
-    if (newAnnotation != undefined) {
-      if ("Rect" in newAnnotation) {
-        return (
+  const createKonvaAnnotation = (annotation: Annotation, index: number) => {
+    if (annotation.type === "Rect") {
+      return (
+        <React.Fragment key={index}>
           <KonvaRect
-            x={newAnnotation.Rect.pos.x * sceneScale}
-            y={newAnnotation.Rect.pos.y * sceneScale}
-            width={newAnnotation.Rect.width * sceneScale}
-            height={newAnnotation.Rect.height * sceneScale}
+            x={annotation.pos.x * sceneScale}
+            y={annotation.pos.y * sceneScale}
+            width={annotation.width * sceneScale}
+            height={annotation.height * sceneScale}
             stroke={"Red"}
             strokeWidth={1.0}
-            listening={false}
+            listening={true}
           />
-        );
-      } else if ("Line" in newAnnotation) {
-        return (
-          <KonvaLine
-            points={[
-              newAnnotation.Line.start.x * sceneScale,
-              newAnnotation.Line.start.y * sceneScale,
-              newAnnotation.Line.finish.x * sceneScale,
-              newAnnotation.Line.finish.y * sceneScale,
-            ]}
-            stroke={"Red"}
-            strokeWidth={1.0}
-            listening={false}
-          />
-        );
-      }
+          {selectedAnnotationIndex === index && (
+          <Transformer
+            flipEnabled={false}
+            boundBoxFunc={(oldBox, newBox) => {
+              // limit resize
+              if (Math.abs(newBox.width) < 5 || Math.abs(newBox.height) < 5) {
+                return oldBox;
+              }
+              return newBox;
+            }}
+          />)}
+        </React.Fragment>
+      );
+    } else if (annotation.type === "Line") {
+      return (
+        <KonvaLine
+          points={[
+            annotation.start.x * sceneScale,
+            annotation.start.y * sceneScale,
+            annotation.finish.x * sceneScale,
+            annotation.finish.y * sceneScale,
+          ]}
+          stroke={"Red"}
+          strokeWidth={1.0}
+          listening={false}
+        />
+      );
     }
   };
 
@@ -324,7 +352,7 @@ const Canvas = ({
           title: "Show Line Profile Chart",
           icon: <FaChartLine size={16} />,
           onClick: handleShowLineProfileChart,
-        }
+        },
       ])}
       style={{ position: "relative" }}
     >
@@ -341,7 +369,7 @@ const Canvas = ({
         y={stageY}
       >
         <Layer imageSmoothingEnabled={false}>
-          <Group x={scenePos.x} y={scenePos.y}>
+          <Group x={scenePos.x} y={scenePos.y} >
             {canvasImageSource != null && (
               <Image
                 image={canvasImageSource}
@@ -353,9 +381,10 @@ const Canvas = ({
                 scaleY={sceneScale}
                 onMouseMove={handleSceneMouseMove}
                 onMouseDown={handleSceneMouseDown}
-              ></Image>
+              />
             )}
-            {getAnnotationComponent()}
+            {annotations.map((annotation) => createKonvaAnnotation(annotation))}
+            {newAnnotation && createKonvaAnnotation(newAnnotation)}
             {metadata && renderCaptureData(metadata.extra_info, sceneScale)}
           </Group>
         </Layer>
