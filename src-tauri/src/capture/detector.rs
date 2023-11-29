@@ -60,20 +60,13 @@ impl DetectorController {
         &mut self,
         capture_settings: CaptureSetting,
         correction_maps: CorrectionMaps,
-        stop_signal: Arc<AtomicBool>,
-    ) -> Result<Pin<Box<dyn Stream<Item = SLImageRs> + Send>>, CaptureError> {
-        let stream = capture_settings.capture_mode.stream_results(
-            capture_settings.exp_time,
-            self.detector.clone(),
-            stop_signal.clone(),
-        )?;
+    ) -> Pin<Box<dyn Stream<Item = SLImageRs> + Send>> {
+        let stream = capture_settings
+            .capture_mode
+            .stream_results(capture_settings.exp_time, self.detector.clone());
 
-        let stop_signal_clone = stop_signal.clone();
-
-        Ok(stream
-            .take_while(move |_| {
-                future::ready(!stop_signal_clone.load(std::sync::atomic::Ordering::Relaxed))
-            })
+        stream
+            .unwrap()
             .map(move |mut image| {
                 if capture_settings.corrected {
                     if correction_maps
@@ -96,7 +89,11 @@ impl DetectorController {
                     image
                 }
             })
-            .boxed())
+            .boxed()
+    }
+
+    pub fn stop_capture(&mut self) {
+        self.detector.go_unlive(true);
     }
 
     fn launch_heartbeat_thread<F>(

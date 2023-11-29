@@ -65,13 +65,6 @@ impl ImageService {
             .unwrap();
     }
 
-    pub fn remove_image_stack(&mut self, stack_idx: usize) {
-        self.image_stacks.remove(stack_idx);
-        self.app
-            .emit("image-state-event", &self.image_stacks)
-            .unwrap();
-    }
-
     pub fn get_handler(&self, stack_idx: usize, ip_idx: usize) -> Option<&ImageHandler> {
         if let Some(stack) = self.image_stacks.get(stack_idx) {
             if let Some(image_handler) = stack.image_handlers.get(ip_idx) {

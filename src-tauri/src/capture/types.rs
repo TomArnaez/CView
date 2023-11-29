@@ -2,7 +2,8 @@ use std::{
     pin::Pin,
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc, mpsc::{self, Sender}
+        mpsc::{self, Sender},
+        Arc,
     },
 };
 
@@ -75,7 +76,6 @@ pub trait AdvCapture {
         detector_controller_mutex: DetectorController,
         correction_maps: &CorrectionMaps,
         progress_tx: Sender<CaptureProgress>,
-        stop_signal: Arc<AtomicBool>,
     ) -> Pin<Box<dyn Stream<Item = CaptureStreamItem> + Send>>;
 
     fn check_stop_signal(

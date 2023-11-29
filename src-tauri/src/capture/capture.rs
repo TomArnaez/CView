@@ -1,14 +1,20 @@
 use std::{
     fmt,
     pin::Pin,
-    sync::{atomic::{AtomicBool, Ordering}, Arc},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
     thread,
-    time::{Instant, Duration},
+    time::{Duration, Instant},
 };
 
 use async_stream::stream;
 use futures_core::stream::Stream;
-use futures_util::StreamExt;
+use futures_util::{
+    stream::{AbortHandle, Abortable},
+    StreamExt,
+};
 use log::error;
 use serde::Serialize;
 use specta::Type;
@@ -151,7 +157,6 @@ pub trait Capture {
         &self,
         exp_time: u32,
         detector: SLDeviceRS,
-        stop_signal: Arc<AtomicBool>
     ) -> Result<Pin<Box<dyn Stream<Item = SLImageRs> + Send>>, CaptureError>;
 
     fn clone_box(&self) -> Box<dyn Capture + Send + 'static>;
@@ -172,23 +177,20 @@ impl Capture for SequenceCapture {
         &self,
         exp_time: u32,
         mut detector: SLDeviceRS,
-        stop_signal: Arc<AtomicBool>
     ) -> Result<Pin<Box<dyn Stream<Item = SLImageRs> + Send>>, CaptureError> {
         println!("Setting up a sequence stream");
         let capture = self.clone();
 
-        let stream = stream! {
+        detector.set_exposure_time(exp_time)?;
+        detector.set_exposure_mode(ExposureModes::seq_mode)?;
+        detector.set_number_frames(capture.num_frames as u32)?;
+        detector.go_live()?;
+        detector.software_trigger()?;
+
+        Ok(stream! {
             println!("Running sequence stream");
-            detector.set_exposure_time(exp_time);
-            detector.set_exposure_mode(ExposureModes::seq_mode);
-            detector.set_number_frames(capture.num_frames as u32);
-            detector.go_live();
-            detector.software_trigger();
 
             for frame_num in 0.. capture.num_frames {
-                if stop_signal.load(Ordering::Relaxed) {
-                    break
-                }
                 let mut image = SLImageRs::new(
                     detector.image_height().unwrap(),
                     detector.image_width().unwrap(),
@@ -199,8 +201,8 @@ impl Capture for SequenceCapture {
             }
 
             detector.go_unlive(true);
-        };
-        Ok(stream.boxed())
+        }
+        .boxed())
     }
 
     fn clone_box(&self) -> Box<dyn Capture + Send + 'static> {
@@ -213,14 +215,14 @@ impl Capture for StreamCapture {
         &self,
         exp_time: u32,
         mut detector: SLDeviceRS,
-        stop_signal: Arc<AtomicBool>
     ) -> Result<Pin<Box<dyn Stream<Item = SLImageRs> + Send>>, CaptureError> {
         let capture = self.clone();
 
-        let stream = stream! {
+        let (abort_handle, abort_registration) = AbortHandle::new_pair();
+        detector.start_stream(exp_time)?;
+        Ok(stream! {
             let start_time = Instant::now();
-            detector.start_stream(exp_time);
-            while !stop_signal.load(Ordering::Relaxed) && (capture.duration.is_none() || start_time.elapsed() < capture.duration.unwrap()) {
+            while capture.duration.is_none() || start_time.elapsed() < capture.duration.unwrap() {
                 let mut image: SLImageRs = SLImageRs::new(
                     detector.image_height().unwrap(),
                     detector.image_width().unwrap(),
@@ -232,9 +234,8 @@ impl Capture for StreamCapture {
                 }
             }
             detector.go_unlive(true);
-        };
-
-        Ok(stream.boxed())
+        }
+        .boxed())
     }
 
     fn clone_box(&self) -> Box<dyn Capture + Send + 'static> {

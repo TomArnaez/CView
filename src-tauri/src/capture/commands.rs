@@ -105,7 +105,7 @@ pub fn stop_capture(
     stream_buffer_mutex: State<Mutex<StreamBuffer>>,
 ) {
     info!("Stopping capture");
-    let capture_manager = capture_manager_mutex.lock().unwrap();
+    let mut capture_manager = capture_manager_mutex.lock().unwrap();
     capture_manager.stop_capture();
     info!("Clearing stream buffer");
     stream_buffer_mutex.lock().unwrap().clear();

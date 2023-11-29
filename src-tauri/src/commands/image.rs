@@ -1,8 +1,8 @@
 use crate::image::Annotation;
 use crate::image::ImageService;
+use image::imageops;
 use image::DynamicImage;
 use image::EncodableLayout;
-use image::imageops;
 use log::info;
 use std::sync::Mutex;
 use tauri::ipc::Response;
@@ -24,7 +24,11 @@ pub fn get_image_binary_rgba(
         let mut return_data = Vec::new();
         return_data.extend_from_slice(&image_handler.image.width().to_le_bytes());
         return_data.extend_from_slice(&image_handler.image.height().to_le_bytes());
-        return_data.append(&mut image_handler.get_rgba_image(saturated_pixel_threshold, resize_size, None));
+        return_data.append(&mut image_handler.get_rgba_image(
+            saturated_pixel_threshold,
+            resize_size,
+            None,
+        ));
         return Response::new(return_data);
     }
     Response::new(vec![])
@@ -139,11 +143,4 @@ pub fn flip(
     {
         image_handler.flip(vertically);
     }
-}
-
-#[tauri::command(async)]
-#[specta::specta]
-pub fn remove_image_stack(image_service_mutex: State<Mutex<ImageService>>, stack_idx: u32) {
-    let mut image_service = image_service_mutex.lock().unwrap();
-    image_service.remove_image_stack(stack_idx as usize);
 }

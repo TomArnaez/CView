@@ -4,13 +4,16 @@ use std::{
     path::PathBuf,
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc, Mutex, mpsc,
+        mpsc, Arc, Mutex,
     },
 };
 
 use async_stream::stream;
 use futures::stream::{self, Stream, StreamExt};
-use futures_util::pin_mut;
+use futures_util::{
+    pin_mut,
+    stream::{abortable, AbortHandle},
+};
 use log::{error, info};
 use regex::Regex;
 use tauri::{AppHandle, Manager, Runtime};
@@ -88,7 +91,7 @@ impl CorrectionMaps {
 
 pub struct CaptureManager {
     detector_controller: DetectorController,
-    stop_signal: Arc<AtomicBool>,
+    capture_abort_handle: Option<AbortHandle>,
     info: Arc<Mutex<CaptureManagerInfo>>,
     correction_maps: CorrectionMaps,
     dark_map_path: PathBuf,
@@ -123,7 +126,7 @@ impl CaptureManager {
 
         Self {
             detector_controller: detector_controller,
-            stop_signal: Arc::new(AtomicBool::new(false)),
+            capture_abort_handle: None,
             info,
             correction_maps,
             dark_map_path,
@@ -234,7 +237,6 @@ impl CaptureManager {
         let detector_controller = self.detector_controller.clone();
         let dark_map_path = self.dark_map_path.clone();
         let info = self.info.clone();
-        let stop_signal_clone: Arc<AtomicBool> = self.stop_signal.clone();
         let correction_maps = self.correction_maps.clone();
 
         tauri::async_runtime::spawn(async move {
@@ -243,7 +245,6 @@ impl CaptureManager {
                     let dark_map_path: PathBuf = dark_map_path.clone();
                     let mut detector_controller = detector_controller.clone();
                     let dark_map_path = dark_map_path.clone();
-                    let stop_signal_clone: Arc<AtomicBool> = stop_signal_clone.clone();
                     let correction_maps = correction_maps.clone();
 
                     async move {
@@ -257,12 +258,7 @@ impl CaptureManager {
                         let mut average_image = SLImageRs::new_depth(1536, 1031, num_frames);
 
                         let mut enumerated_stream = detector_controller
-                            .run_capture_stream(
-                                capture_settings.clone(),
-                                correction_maps,
-                                stop_signal_clone,
-                            )
-                            .expect("Failed to run capture stream")
+                            .run_capture_stream(capture_settings.clone(), correction_maps)
                             .enumerate();
 
                         while let Some((index, mut image)) = enumerated_stream.next().await {
@@ -310,7 +306,6 @@ impl CaptureManager {
         let correction_maps = self.correction_maps.clone();
         let detector_controller = self.detector_controller.clone();
 
-        let stop_signal_clone: Arc<AtomicBool> = self.stop_signal.clone();
         tauri::async_runtime::spawn(async move {
             stream::iter(dark_exp_times)
                 .flat_map(|exp_time| {
@@ -332,7 +327,6 @@ impl CaptureManager {
                 .then(|(exp_time, full_well_mode)| {
                     let correction_maps = correction_maps.clone();
                     let defect_map_path = defect_map_path.clone();
-                    let stop_signal_clone: Arc<AtomicBool> = stop_signal_clone.clone();
                     let mut detector_controller = detector_controller.clone();
 
                     async move {
@@ -347,12 +341,7 @@ impl CaptureManager {
                         let mut average_image = SLImageRs::new_depth(1536, 1031, num_frames);
 
                         let mut enumerated_stream = detector_controller
-                            .run_capture_stream(
-                                capture_settings.clone(),
-                                correction_maps,
-                                stop_signal_clone,
-                            )
-                            .expect("Failed to run capture stream")
+                            .run_capture_stream(capture_settings.clone(), correction_maps)
                             .enumerate();
 
                         while let Some((index, mut image)) = enumerated_stream.next().await {
@@ -470,22 +459,24 @@ impl CaptureManager {
         self.info.lock().unwrap().status = CaptureManagerStatus::Capturing(capture.clone());
         self.emit_event(app.clone());
 
-
-        self.stop_signal.store(false, Ordering::SeqCst);
         let (progress_tx, mut progress_rx) = mpsc::channel();
 
-        let stream = capture.start_stream(
+        let (abortable_stream, abort_handle) = abortable(capture.start_stream(
             self.detector_controller.clone(),
             &self.correction_maps,
             progress_tx,
-            self.stop_signal.clone(),
-        );
+        ));
 
-        Ok(Self::wrap_stream(stream, self.info.clone()))
+        self.capture_abort_handle = Some(abort_handle);
+
+        Ok(Self::wrap_stream(abortable_stream, self.info.clone()))
     }
 
-    pub fn stop_capture(&self) {
-        self.stop_signal.store(true, Ordering::SeqCst);
+    pub fn stop_capture(&mut self) {
+        if let Some(capture_abort_handle) = &self.capture_abort_handle {
+            capture_abort_handle.abort();
+            self.detector_controller.stop_capture();
+        }
     }
 
     fn emit_event<T: Runtime>(&self, app: AppHandle<T>) {
